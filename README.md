@@ -3,7 +3,7 @@
 ## Descripción
 Aplicación PWA para reemplazar la planilla física de nómina de Plastic Center Cali. Incluye:
 - Login seguro con Supabase Auth.
-- Roles `admin` y `encargado`.
+- Roles `admin`, `encargado` y `gerencial`.
 - Panel de carga diaria para registro rápido de pesajes.
 - Dashboard administrativo con consolidado semanal, gestión de empleados y tarifas.
 - PWA instalable en celular y PC.
@@ -39,6 +39,9 @@ Aplicación PWA para reemplazar la planilla física de nómina de Plastic Center
 
 - `encargado`: accede a `/carga-diaria`, registra pesajes por fecha, empleado, proceso y material.
 - `admin`: accede a `/admin`, revisa consolidado semanal, actualiza tarifas y administra empleados.
+- `gerencial`: accede a `/admin` en modo de consulta y únicamente visualiza Consolidado y Analítica.
+
+Para una base de datos existente, ejecuta `supabase-gerencial-role.sql` en Supabase SQL Editor. La migración agrega el rol y restringe mediante RLS las operaciones de escritura a los roles autorizados.
 
 ## Despliegue
 

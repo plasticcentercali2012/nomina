@@ -73,6 +73,13 @@ export function AdminDashboardPage() {
   }, [semanaInicio]);
 
   const isAdmin = profile?.rol === 'admin';
+  const isGerencial = profile?.rol === 'gerencial';
+
+  useEffect(() => {
+    if (isGerencial && activeTab !== 'consolidado' && activeTab !== 'analitica') {
+      setActiveTab('consolidado');
+    }
+  }, [activeTab, isGerencial]);
 
   async function handleSignOut() {
     await signOut?.();
@@ -438,12 +445,13 @@ export function AdminDashboardPage() {
         />
       <main className="mx-auto w-full max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div><p className="eyebrow">Centro de control</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">Resumen de nómina</h2><p className="mt-1 text-sm text-slate-400">Gestiona la operación, tarifas y cierres desde un solo lugar.</p></div>
+          <div><p className="eyebrow">Centro de control</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">Resumen de nómina</h2><p className="mt-1 text-sm text-slate-400">{isGerencial ? 'Consulta consolidados y analiza la producción.' : 'Gestiona la operación, tarifas y cierres desde un solo lugar.'}</p></div>
           <div className="badge-success w-fit"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Sistema operativo</div>
         </div>
 
         <nav aria-label="Módulos del dashboard" className="card p-2">
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+          <div className={`grid gap-1 ${isGerencial ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
+            {!isGerencial && (
             <button
               type="button"
               onClick={() => setActiveTab('gestion')}
@@ -451,6 +459,8 @@ export function AdminDashboardPage() {
             >
               <Icon name="users" className="h-4 w-4" /><span className="hidden sm:inline">Gestión de </span>empleados
             </button>
+            )}
+            {!isGerencial && (
             <button
               type="button"
               onClick={() => setActiveTab('tarifas')}
@@ -458,6 +468,7 @@ export function AdminDashboardPage() {
             >
               <Icon name="wallet" className="h-4 w-4" /> Tarifas
             </button>
+            )}
             <button
               type="button"
               onClick={() => setActiveTab('consolidado')}
@@ -475,7 +486,7 @@ export function AdminDashboardPage() {
           </div>
         </nav>
 
-        {activeTab === 'gestion' && (
+        {!isGerencial && activeTab === 'gestion' && (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <h2 className="text-2xl font-semibold">Gestión de empleados</h2>
             <div className="responsive-table mt-6 overflow-x-auto">
@@ -581,7 +592,7 @@ export function AdminDashboardPage() {
           </section>
         )}
 
-        {activeTab === 'tarifas' && (
+        {!isGerencial && activeTab === 'tarifas' && (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
@@ -992,6 +1003,7 @@ export function AdminDashboardPage() {
           <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
             <div className="card p-5 sm:p-6">
               <h3 className="text-xl font-semibold">Pagos adicionales</h3>
+              {isAdmin && (
               <form onSubmit={handleCrearPagoAdicional} className="mt-4 grid gap-4 md:grid-cols-4">
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Empleado</span>
@@ -1038,6 +1050,7 @@ export function AdminDashboardPage() {
                   Agregar pago
                 </button>
               </form>
+              )}
               <div className="mt-6 space-y-3">
                 {pagosAdicionales.map((pago) => (
                   <div key={pago.id} className="flex flex-col gap-2 rounded-3xl border border-slate-800 bg-slate-900/95 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1047,11 +1060,11 @@ export function AdminDashboardPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-semibold text-emerald-300">{formatCurrency(pago.valor)}</span>
-                      <button
+                      {isAdmin && <button
                         type="button"
                         onClick={() => handleEliminarPagoAdicional(pago.id)}
                         className="rounded-2xl bg-rose-500 px-3 py-2 text-sm text-white transition hover:bg-rose-400"
-                      >Eliminar</button>
+                      >Eliminar</button>}
                     </div>
                   </div>
                 ))}
@@ -1060,14 +1073,14 @@ export function AdminDashboardPage() {
             <div className="card p-5 sm:p-6">
               <h3 className="text-xl font-semibold">Nómina semanal</h3>
               <p className="mt-2 text-slate-400">Guarda el total de pagos para esta semana.</p>
-              <button
+              {isAdmin && <button
                 type="button"
                 onClick={handleGuardarNominaSemanal}
                 disabled={loadingAction}
                 className="mt-6 w-full rounded-2xl bg-sky-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-sky-400 disabled:opacity-60"
               >
                 Guardar nómina semanal
-              </button>
+              </button>}
               <div className="mt-6 space-y-3 text-slate-300">
                 <p>Total empleados: {empleados.length}</p>
                 <p>Total pagos extras: {formatCurrency(pagosAdicionales.reduce((sum, pago) => sum + pago.valor, 0))}</p>

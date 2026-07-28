@@ -4,7 +4,7 @@
 create table if not exists public.usuarios_sistema (
   id uuid primary key default gen_random_uuid(),
   email text unique not null,
-  rol text not null check (rol in ('admin', 'encargado')),
+  rol text not null check (rol in ('admin', 'encargado', 'gerencial')),
   created_at timestamptz not null default now()
 );
 

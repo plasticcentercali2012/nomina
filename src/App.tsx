@@ -21,9 +21,9 @@ function App() {
       />
       <Route
         path="/admin"
-        element={profile?.rol === 'admin' ? <AdminDashboardPage /> : <Navigate to="/login" replace />}
+        element={profile?.rol === 'admin' || profile?.rol === 'gerencial' ? <AdminDashboardPage /> : <Navigate to="/login" replace />}
       />
-      <Route path="/*" element={<Navigate to={profile?.rol === 'admin' ? '/admin' : '/carga-diaria'} replace />} />
+      <Route path="/*" element={<Navigate to={profile?.rol === 'admin' || profile?.rol === 'gerencial' ? '/admin' : '/carga-diaria'} replace />} />
     </Routes>
   );
 }

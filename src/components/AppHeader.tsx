@@ -23,7 +23,9 @@ export function AppHeader({ title, subtitle, role, email, onSignOut }: Props) {
         <div className="flex items-center gap-2">
           <span className="hidden text-right md:block">
             <span className="block text-xs font-semibold text-slate-200">{email}</span>
-            <span className="block text-[10px] capitalize text-slate-500">{role === 'admin' ? 'Administrador' : 'Encargado de planta'}</span>
+            <span className="block text-[10px] capitalize text-slate-500">
+              {role === 'admin' ? 'Administrador' : role === 'gerencial' ? 'Gerencial' : 'Encargado de planta'}
+            </span>
           </span>
           <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-800 text-xs font-bold text-indigo-300 ring-1 ring-slate-700">{initials}</div>
           <button type="button" onClick={() => void onSignOut()} title="Cerrar sesión" aria-label="Cerrar sesión"
