@@ -4,9 +4,11 @@ import { supabase } from '../lib/supabaseClient';
 import { AppHeader } from '../components/AppHeader';
 import { Empleado, NominaSemanal, PagoAdicional, RegistroDiario, Tarifa, UsuarioSistema } from '../types';
 import { useAuth } from '../hooks/useAuth';
+import { Icon } from '../components/ui/Icon';
+import { LoadingScreen } from '../components/ui/LoadingScreen';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
-const procesos = ['Picador', 'Lavador', 'Aglutinador'] as const;
+const procesos = ['Picador', 'Lavador', 'Aglutinador','Encargado'] as const;
 const materiales = ['Poli', 'M', 'T'] as const;
 const materialDisplayNames: Record<typeof materiales[number], string> = {
   Poli: 'Policolor',
@@ -15,7 +17,16 @@ const materialDisplayNames: Record<typeof materiales[number], string> = {
 };
 
 function formatCurrency(value: number) {
-  return `$${value.toFixed(2)}`;
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
+}
+
+function parseCurrencyInput(value: string) {
+  return Number(value.replace(/\D/g, '')) || 0;
+}
+
+function formatCurrencyInput(value: string) {
+  const digits = value.replace(/\D/g, '');
+  return digits ? new Intl.NumberFormat('es-CO').format(Number(digits)) : '';
 }
 
 export function AdminDashboardPage() {
@@ -42,10 +53,14 @@ export function AdminDashboardPage() {
   const [nuevoTarifaMaterial, setNuevoTarifaMaterial] = useState<Tarifa['material']>('Poli');
   const [nuevoTarifaPrecio, setNuevoTarifaPrecio] = useState<number>(0);
   const [nuevoPagoDescripcion, setNuevoPagoDescripcion] = useState('');
-  const [nuevoPagoValor, setNuevoPagoValor] = useState<number>(0);
+  const [nuevoPagoValor, setNuevoPagoValor] = useState('');
   const [pagoEmpleadoId, setPagoEmpleadoId] = useState<string>('');
   const [loadingAction, setLoadingAction] = useState(false);
-  const [activeTab, setActiveTab] = useState<'gestion' | 'tarifas' | 'consolidado'>('gestion');
+  const [activeTab, setActiveTab] = useState<'gestion' | 'tarifas' | 'consolidado' | 'analitica'>('gestion');
+  const [periodoAnalitica, setPeriodoAnalitica] = useState<'dia' | 'semana' | 'mes'>('semana');
+  const [fechaAnalitica, setFechaAnalitica] = useState(new Date().toISOString().slice(0, 10));
+  const [registrosAnalitica, setRegistrosAnalitica] = useState<RegistroDiario[]>([]);
+  const [cargandoAnalitica, setCargandoAnalitica] = useState(false);
 
   const weekDates = useMemo(() => {
     if (!semanaInicio) return [];
@@ -105,6 +120,38 @@ export function AdminDashboardPage() {
       .eq('semana_inicio', weekDates[0])
       .then(({ data }) => data && setNominasSemanales(data as NominaSemanal[]));
   }, [weekDates]);
+
+  const rangoAnalitica = useMemo(() => {
+    const base = new Date(`${fechaAnalitica}T12:00:00`);
+    let inicio = new Date(base);
+    let fin = new Date(base);
+    if (periodoAnalitica === 'semana') {
+      const desplazamiento = base.getDay() === 0 ? -6 : 1 - base.getDay();
+      inicio.setDate(base.getDate() + desplazamiento);
+      fin = new Date(inicio);
+      fin.setDate(inicio.getDate() + 5);
+    }
+    if (periodoAnalitica === 'mes') {
+      inicio = new Date(base.getFullYear(), base.getMonth(), 1, 12);
+      fin = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12);
+    }
+    return { inicio: inicio.toISOString().slice(0, 10), fin: fin.toISOString().slice(0, 10) };
+  }, [fechaAnalitica, periodoAnalitica]);
+
+  useEffect(() => {
+    if (activeTab !== 'analitica') return;
+    setCargandoAnalitica(true);
+    supabase
+      .from('registros_diarios')
+      .select('*')
+      .gte('fecha', rangoAnalitica.inicio)
+      .lte('fecha', rangoAnalitica.fin)
+      .order('fecha', { ascending: true })
+      .then(({ data }) => {
+        setRegistrosAnalitica((data as RegistroDiario[]) ?? []);
+        setCargandoAnalitica(false);
+      });
+  }, [activeTab, rangoAnalitica]);
 
   useEffect(() => {
     if (empleados.length && !selectedEmpleadoId) {
@@ -167,16 +214,16 @@ export function AdminDashboardPage() {
 
   const estadisticas = useMemo(() => {
     return {
-      procesos: registros.reduce<Record<string, number>>((acc, registro) => {
+      procesos: registrosAnalitica.reduce<Record<string, number>>((acc, registro) => {
         acc[registro.proceso] = (acc[registro.proceso] ?? 0) + (registro.peso_kg ?? 0);
         return acc;
       }, {}),
-      materiales: registros.reduce<Record<string, number>>((acc, registro) => {
+      materiales: registrosAnalitica.reduce<Record<string, number>>((acc, registro) => {
         acc[registro.material] = (acc[registro.material] ?? 0) + (registro.peso_kg ?? 0);
         return acc;
       }, {})
     };
-  }, [registros]);
+  }, [registrosAnalitica]);
 
   function getDetallesDelDia(empleadoId: string, fecha: string) {
     return registros
@@ -231,14 +278,15 @@ export function AdminDashboardPage() {
 
   async function handleCrearPagoAdicional(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!pagoEmpleadoId || !nuevoPagoDescripcion.trim() || nuevoPagoValor <= 0) return;
+    const valorPago = parseCurrencyInput(nuevoPagoValor);
+    if (!pagoEmpleadoId || !nuevoPagoDescripcion.trim() || valorPago <= 0) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('pagos_adicionales').insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], descripcion: nuevoPagoDescripcion.trim(), valor: nuevoPagoValor }]);
+    const { data, error } = await supabase.from('pagos_adicionales').insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], descripcion: nuevoPagoDescripcion.trim(), valor: valorPago }]);
     if (data?.[0]) {
       setPagosAdicionales((current) => [...current, data[0]]);
       setNuevoPagoDescripcion('');
-      setNuevoPagoValor(0);
+      setNuevoPagoValor('');
       setPagoEmpleadoId('');
     }
     setLoadingAction(false);
@@ -355,13 +403,32 @@ export function AdminDashboardPage() {
     URL.revokeObjectURL(url);
   }
 
+  function exportAnaliticaCsv() {
+    const encabezados = ['Fecha', 'Empleado', 'Proceso', 'Material', 'Kilos'];
+    const filas = registrosAnalitica.map((registro) => [
+      registro.fecha,
+      empleados.find((empleado) => empleado.id === registro.empleado_id)?.nombre ?? 'Empleado',
+      registro.proceso,
+      materialDisplayNames[registro.material],
+      registro.peso_kg ?? 0
+    ]);
+    const escapar = (valor: string | number) => `"${String(valor).replace(/"/g, '""')}"`;
+    const csv = '\uFEFF' + [encabezados, ...filas].map((fila) => fila.map(escapar).join(';')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `volumen_${periodoAnalitica}_${rangoAnalitica.inicio}_${rangoAnalitica.fin}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) {
-    return <div className="p-8 text-center text-slate-300">Cargando...</div>;
+    return <LoadingScreen label="Preparando el dashboard" />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100">
-      <div className="mx-auto w-full max-w-7xl space-y-6">
+    <div className="app-bg">
         <AppHeader
           title="Dashboard de nómina"
           subtitle="Administra tarifas, empleados y revisa el consolidado semanal."
@@ -369,37 +436,49 @@ export function AdminDashboardPage() {
           email={user?.email ?? profile?.email}
           onSignOut={handleSignOut}
         />
+      <main className="mx-auto w-full max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div><p className="eyebrow">Centro de control</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">Resumen de nómina</h2><p className="mt-1 text-sm text-slate-400">Gestiona la operación, tarifas y cierres desde un solo lugar.</p></div>
+          <div className="badge-success w-fit"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Sistema operativo</div>
+        </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-4 shadow-lg shadow-slate-950/20">
-          <div className="flex flex-wrap gap-3">
+        <nav aria-label="Módulos del dashboard" className="card p-2">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
             <button
               type="button"
               onClick={() => setActiveTab('gestion')}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${activeTab === 'gestion' ? 'bg-sky-500 text-slate-950' : 'bg-slate-950 text-slate-300 hover:bg-slate-900'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'gestion' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
-              Gestión de empleados
+              <Icon name="users" className="h-4 w-4" /><span className="hidden sm:inline">Gestión de </span>empleados
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('tarifas')}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${activeTab === 'tarifas' ? 'bg-sky-500 text-slate-950' : 'bg-slate-950 text-slate-300 hover:bg-slate-900'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'tarifas' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
-              Tarifas por proceso
+              <Icon name="wallet" className="h-4 w-4" /> Tarifas
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('consolidado')}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${activeTab === 'consolidado' ? 'bg-sky-500 text-slate-950' : 'bg-slate-950 text-slate-300 hover:bg-slate-900'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'consolidado' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
-              Consolidado semanal
+              <Icon name="grid" className="h-4 w-4" /> Consolidado
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('analitica')}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'analitica' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
+            >
+              <Icon name="activity" className="h-4 w-4" /> Analítica
             </button>
           </div>
-        </div>
+        </nav>
 
         {activeTab === 'gestion' && (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <h2 className="text-2xl font-semibold">Gestión de empleados</h2>
-            <div className="mt-6 overflow-x-auto">
+            <div className="responsive-table mt-6 overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-300">
@@ -517,7 +596,7 @@ export function AdminDashboardPage() {
                 Ver consolidado
               </button>
             </div>
-            <div className="mt-6 overflow-x-auto">
+            <div className="responsive-table mt-6 overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-300">
@@ -622,7 +701,9 @@ export function AdminDashboardPage() {
         )}
 
         {activeTab === 'consolidado' && (
-          <section className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
+          <section className="space-y-6">
+          <div className="card overflow-hidden">
+            <div className="p-5 sm:p-6">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
                 <h2 className="text-2xl font-semibold">Consolidado semanal</h2>
@@ -645,8 +726,9 @@ export function AdminDashboardPage() {
                 </button>
               </div>
             </div>
-            <div className="mt-4 overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
+            </div>
+            <div className="overflow-x-auto border-t border-slate-800">
+            <table className="min-w-[1280px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-300">
                   <th className="px-4 py-3">Empleado</th>
@@ -680,14 +762,14 @@ export function AdminDashboardPage() {
                     );
                   })}
                       <td className="px-4 py-3 font-semibold text-sky-300">{total.toFixed(0)}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-100">{getPagoAdicional(empleado.id).toFixed(2)}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-100">{formatCurrency(getPagoAdicional(empleado.id))}</td>
                       <td className="px-4 py-3 font-semibold text-emerald-300">
-                        {(
+                        {formatCurrency(
                           registros
                             .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
                             .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0)
                           + getPagoAdicional(empleado.id)
-                        ).toFixed(2)}
+                        )}
                       </td>
                     </tr>
                   );
@@ -695,8 +777,9 @@ export function AdminDashboardPage() {
               </tbody>
             </table>
           </div>
+          </div>
 
-          <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+          <div className="card p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h3 className="text-xl font-semibold">Detalle por empleado</h3>
@@ -749,7 +832,7 @@ export function AdminDashboardPage() {
               </div>
             </div>
 
-            <div className="mt-6 overflow-x-auto">
+            <div className="responsive-table mt-6 overflow-x-auto">
               {registrosPorEmpleadoYDia.length === 0 ? (
                 <p className="rounded-3xl border border-slate-800 bg-slate-900/95 p-4 text-sm text-slate-400">No hay registros para este empleado y día.</p>
               ) : (
@@ -780,7 +863,7 @@ export function AdminDashboardPage() {
           </div>
 
           {isAdmin && (
-            <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+            <div className="card p-5 sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-semibold">Ingreso libre de kilos</h3>
@@ -859,7 +942,7 @@ export function AdminDashboardPage() {
                   Registrar kilos
                 </button>
               </div>
-              <div className="mt-6 overflow-x-auto">
+              <div className="responsive-table mt-6 overflow-x-auto">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-300">
@@ -906,8 +989,8 @@ export function AdminDashboardPage() {
             </div>
           )}
 
-          <div className="mt-8 grid gap-6 xl:grid-cols-[2fr_1fr]">
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+            <div className="card p-5 sm:p-6">
               <h3 className="text-xl font-semibold">Pagos adicionales</h3>
               <form onSubmit={handleCrearPagoAdicional} className="mt-4 grid gap-4 md:grid-cols-4">
                 <label className="space-y-2">
@@ -934,15 +1017,18 @@ export function AdminDashboardPage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Valor</span>
+                  <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-slate-500">$</span>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="numeric"
                     value={nuevoPagoValor}
-                    onChange={(event) => setNuevoPagoValor(Number(event.target.value))}
-                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
-                    placeholder="0.00"
+                    onChange={(event) => setNuevoPagoValor(formatCurrencyInput(event.target.value))}
+                    className="w-full rounded-2xl bg-slate-900 py-3 pl-9 pr-4"
+                    placeholder="9.000"
+                    aria-label="Valor del pago adicional en pesos colombianos"
                   />
+                  </div>
                 </label>
                 <button
                   type="submit"
@@ -960,7 +1046,7 @@ export function AdminDashboardPage() {
                       <p className="text-sm text-slate-400">{pago.descripcion}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-semibold text-emerald-300">{pago.valor.toFixed(2)}</span>
+                      <span className="font-semibold text-emerald-300">{formatCurrency(pago.valor)}</span>
                       <button
                         type="button"
                         onClick={() => handleEliminarPagoAdicional(pago.id)}
@@ -971,7 +1057,7 @@ export function AdminDashboardPage() {
                 ))}
               </div>
             </div>
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+            <div className="card p-5 sm:p-6">
               <h3 className="text-xl font-semibold">Nómina semanal</h3>
               <p className="mt-2 text-slate-400">Guarda el total de pagos para esta semana.</p>
               <button
@@ -984,15 +1070,56 @@ export function AdminDashboardPage() {
               </button>
               <div className="mt-6 space-y-3 text-slate-300">
                 <p>Total empleados: {empleados.length}</p>
-                <p>Total pagos extras: {pagosAdicionales.reduce((sum, pago) => sum + pago.valor, 0).toFixed(2)}</p>
-                <p className="font-semibold">Total a pagar general: {empleados.reduce((sum, empleado) => sum + (registros.filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha)).reduce((inner, item) => inner + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0) + getPagoAdicional(empleado.id)), 0).toFixed(2)}</p>
+                <p>Total pagos extras: {formatCurrency(pagosAdicionales.reduce((sum, pago) => sum + pago.valor, 0))}</p>
+                <p className="font-semibold">Total a pagar general: {formatCurrency(empleados.reduce((sum, empleado) => sum + (registros.filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha)).reduce((inner, item) => inner + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0) + getPagoAdicional(empleado.id)), 0))}</p>
               </div>
             </div>
           </div>
         </section>
         )}
 
-        <section className="grid gap-6 xl:grid-cols-3">
+        {activeTab === 'analitica' && (
+        <section className="space-y-6">
+          <div className="card p-5 sm:p-6">
+            <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+              <div>
+                <p className="eyebrow">Análisis operativo</p>
+                <h2 className="mt-1 text-2xl font-bold text-white">Volumen de producción</h2>
+                <p className="mt-1 text-sm text-slate-400">Datos obtenidos directamente de los registros diarios.</p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div>
+                  <label className="mb-2 block text-xs font-semibold text-slate-400">Periodo</label>
+                  <div className="flex rounded-xl border border-slate-800 bg-slate-950 p-1">
+                    {(['dia', 'semana', 'mes'] as const).map((periodo) => (
+                      <button key={periodo} type="button" onClick={() => setPeriodoAnalitica(periodo)}
+                        className={`rounded-lg border-0 px-3 py-2 text-xs font-semibold capitalize transition ${periodoAnalitica === periodo ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-500 hover:text-slate-200'}`}>
+                        {periodo === 'dia' ? 'Día' : periodo}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label>
+                  <span className="mb-2 block text-xs font-semibold text-slate-400">Fecha de referencia</span>
+                  <input type="date" value={fechaAnalitica} onChange={(event) => setFechaAnalitica(event.target.value)} className="field" />
+                </label>
+                <button type="button" onClick={exportAnaliticaCsv} disabled={!registrosAnalitica.length} className="btn-secondary">
+                  <Icon name="download" className="h-4 w-4" /> Exportar CSV
+                </button>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-800 pt-4 text-xs text-slate-400">
+              <span className="badge bg-indigo-500/10 text-indigo-300 ring-indigo-500/20">
+                {rangoAnalitica.inicio === rangoAnalitica.fin ? rangoAnalitica.inicio : `${rangoAnalitica.inicio} — ${rangoAnalitica.fin}`}
+              </span>
+              <span>{registrosAnalitica.length} registros encontrados</span>
+            </div>
+          </div>
+          {cargandoAnalitica ? (
+            <div className="card grid min-h-64 place-items-center"><div className="text-center"><span className="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-indigo-400/20 border-t-indigo-400" /><p className="mt-3 text-sm text-slate-500">Consultando producción…</p></div></div>
+          ) : (
+          <>
+          <div className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <h3 className="text-xl font-semibold">Volumen por proceso</h3>
             <div className="mt-4 space-y-3 text-slate-300">
@@ -1015,6 +1142,7 @@ export function AdminDashboardPage() {
               ))}
             </div>
           </div>
+          </div>
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <h3 className="text-xl font-semibold">Resumen rápido</h3>
             <div className="mt-4 space-y-3 text-slate-300">
@@ -1024,16 +1152,45 @@ export function AdminDashboardPage() {
               </div>
               <div className="rounded-3xl bg-slate-950/70 px-4 py-3">
                 <p>Total registros</p>
-                <p className="text-3xl font-semibold text-sky-300">{registros.length}</p>
+                <p className="text-3xl font-semibold text-sky-300">{registrosAnalitica.length}</p>
               </div>
               <div className="rounded-3xl bg-slate-950/70 px-4 py-3">
-                <p>Total kg semana</p>
-                <p className="text-3xl font-semibold text-sky-300">{registros.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0).toFixed(0)}</p>
+                <p>Total kg del periodo</p>
+                <p className="text-3xl font-semibold text-sky-300">{registrosAnalitica.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0).toLocaleString('es-CO')} kg</p>
               </div>
             </div>
           </div>
+          <div className="card overflow-hidden">
+            <div className="flex flex-col justify-between gap-3 border-b border-slate-800 p-5 sm:flex-row sm:items-center">
+              <div><h3 className="font-bold text-white">Detalle del periodo</h3><p className="mt-1 text-xs text-slate-500">Trazabilidad por fecha, empleado, proceso y material.</p></div>
+              <span className="badge-success">{registrosAnalitica.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0).toLocaleString('es-CO')} kg</span>
+            </div>
+            {registrosAnalitica.length === 0 ? (
+              <div className="grid min-h-40 place-items-center p-6 text-center"><div><Icon name="file" className="mx-auto h-8 w-8 text-slate-700" /><p className="mt-3 text-sm text-slate-500">No hay producción registrada en este periodo.</p></div></div>
+            ) : (
+              <div className="responsive-table overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead><tr><th className="px-5 py-3">Fecha</th><th className="px-5 py-3">Empleado</th><th className="px-5 py-3">Proceso</th><th className="px-5 py-3">Material</th><th className="px-5 py-3 text-right">Volumen</th></tr></thead>
+                  <tbody>
+                    {registrosAnalitica.map((registro) => (
+                      <tr key={registro.id} className="border-t border-slate-800/70">
+                        <td data-label="Fecha" className="px-5 py-3">{registro.fecha}</td>
+                        <td data-label="Empleado" className="px-5 py-3 font-medium text-white">{empleados.find((empleado) => empleado.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>
+                        <td data-label="Proceso" className="px-5 py-3">{registro.proceso}</td>
+                        <td data-label="Material" className="px-5 py-3">{materialDisplayNames[registro.material]}</td>
+                        <td data-label="Volumen" className="px-5 py-3 text-right font-semibold text-indigo-300">{(registro.peso_kg ?? 0).toLocaleString('es-CO')} kg</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          </>
+          )}
         </section>
-      </div>
+        )}
+      </main>
     </div>
   );
 }

@@ -4,6 +4,9 @@ import { supabase } from '../lib/supabaseClient';
 import { AppHeader } from '../components/AppHeader';
 import { Empleado, Material, Proceso, RegistroDiario } from '../types';
 import { useAuth } from '../hooks/useAuth';
+import { Icon } from '../components/ui/Icon';
+import { LoadingScreen } from '../components/ui/LoadingScreen';
+import { Toast } from '../components/ui/Toast';
 
 const materiales: Material[] = ['Poli', 'M', 'T'];
 const materialDisplayNames: Record<Material, string> = {
@@ -106,11 +109,11 @@ export function CargaDiariaPage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-300">Cargando...</div>;
+    return <LoadingScreen label="Cargando operación diaria" />;
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-lime-50,_#EBF6E6)] px-4 py-6 text-slate-950">
+    <div className="app-bg">
       <AppHeader
         title="Carga diaria"
         subtitle="Registra rápidamente el peso por empleado, proceso y material."
@@ -118,41 +121,39 @@ export function CargaDiariaPage() {
         email={user?.email ?? profile?.email}
         onSignOut={handleSignOut}
       />
-      <div className="mx-auto w-full max-w-5xl space-y-10 mt-6">
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-3xl border border-slate-300 bg-[#B0BFC8] p-6 shadow-lg shadow-slate-400/20">
-            <p className="text-sm uppercase tracking-[0.25em] text-slate-700">Resumen diario</p>
-            <p className="mt-4 text-5xl font-semibold text-slate-950">{totalKilos.toFixed(0)}</p>
-            <p className="mt-2 text-sm text-slate-700">kg registrados hoy</p>
+      <main className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <div>
+          <p className="eyebrow">Operación de planta</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">Registro de producción</h2>
+          <p className="mt-1 text-sm text-slate-400">Captura el peso procesado de forma rápida y precisa.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="card flex items-center gap-5 p-5">
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400"><Icon name="weight" className="h-6 w-6" /></div>
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Volumen registrado</p>
+            <p className="mt-1 text-3xl font-bold text-white">{totalKilos.toLocaleString('es-CO')} <span className="text-sm font-medium text-slate-500">kg</span></p></div>
           </div>
 
-          <div className="rounded-3xl border border-slate-300 bg-[#B0BFC8] p-6 shadow-lg shadow-slate-400/20">
-            <p className="text-sm uppercase tracking-[0.25em] text-slate-700">Fecha de hoy</p>
-            <p className="mt-4 text-3xl font-semibold text-slate-950">{fecha}</p>
-            <p className="mt-2 text-sm text-slate-600">Fecha fija, no editable</p>
+          <div className="card flex items-center gap-5 p-5">
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-sky-500/10 text-sky-400"><Icon name="calendar" className="h-6 w-6" /></div>
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Jornada actual</p>
+            <p className="mt-1 text-lg font-bold capitalize text-white">{new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${fecha}T12:00:00`))}</p></div>
           </div>
         </div>
 
-        {successMessage && (
-          <div className="rounded-3xl border border-emerald-500 bg-emerald-500/10 p-4 text-emerald-200">
-            {successMessage}
-          </div>
-        )}
-        {errorMessage && (
-          <div className="rounded-3xl border border-rose-500 bg-rose-500/10 p-4 text-rose-200">
-            {errorMessage}
-          </div>
-        )}
+        {successMessage && <Toast type="success" message={successMessage} onClose={() => setSuccessMessage('')} />}
+        {errorMessage && <Toast type="error" message={errorMessage} onClose={() => setErrorMessage('')} />}
 
-        <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-          <form onSubmit={handleSave} className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <div className="grid gap-4">
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,.75fr)]">
+          <form onSubmit={handleSave} className="card p-5 sm:p-7">
+            <div className="mb-6"><h3 className="text-lg font-bold text-white">Nuevo registro</h3><p className="mt-1 text-sm text-slate-500">Todos los campos son obligatorios.</p></div>
+            <div className="grid gap-5 sm:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">Empleado</span>
                 <select
                   value={empleadoId}
                   onChange={(event) => setEmpleadoId(event.target.value)}
-                  className="w-full rounded-2xl bg-slate-950 px-4 py-3"
+                  className="field"
                 >
                   {empleados.map((empleado) => (
                     <option key={empleado.id} value={empleado.id}>
@@ -164,7 +165,7 @@ export function CargaDiariaPage() {
 
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">Proceso</span>
-                <select value={proceso} disabled className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-slate-400">
+                <select value={proceso} disabled className="field">
                   {procesos.map((item) => (
                     <option key={item} value={item}>{item}</option>
                   ))}
@@ -173,7 +174,7 @@ export function CargaDiariaPage() {
 
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">Material</span>
-                <select value={material} onChange={(event) => setMaterial(event.target.value as Material)} className="w-full rounded-2xl bg-slate-950 px-4 py-3">
+                <select value={material} onChange={(event) => setMaterial(event.target.value as Material)} className="field">
                   {materiales.map((item) => (
                     <option key={item} value={item}>{materialDisplayNames[item]}</option>
                   ))}
@@ -193,7 +194,7 @@ export function CargaDiariaPage() {
                       void handleSave(event as any);
                     }
                   }}
-                  className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-xl font-semibold"
+                  className="field text-lg font-semibold"
                   placeholder="23, 25, 24"
                   required
                 />
@@ -202,31 +203,31 @@ export function CargaDiariaPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="mt-2 w-full rounded-2xl bg-sky-500 px-4 py-3 font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn-primary mt-1 sm:col-span-2"
               >
-                {saving ? 'Guardando...' : 'Registrar peso'}
+                {saving ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Guardando...</> : <><Icon name="plus" className="h-4 w-4" /> Registrar peso</>}
               </button>
             </div>
           </form>
 
-          <aside className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <h2 className="text-xl font-semibold">Registros de hoy</h2>
-            <p className="mt-2 text-sm text-slate-400">Detalle de lo ingresado para este empleado.</p>
-            <div className="mt-6 space-y-3">
+          <aside className="card overflow-hidden">
+            <div className="border-b border-slate-800 p-5"><div className="flex items-center justify-between"><h2 className="font-bold text-white">Actividad reciente</h2><span className="badge-success">{registros.length} registros</span></div>
+            <p className="mt-1 text-xs text-slate-500">Movimientos del empleado seleccionado.</p></div>
+            <div className="max-h-[430px] space-y-2 overflow-y-auto p-3">
               {registros.length === 0 ? (
-                <p className="text-sm text-slate-500">Aún no hay registros para este empleado.</p>
+                <div className="py-12 text-center"><Icon name="file" className="mx-auto h-8 w-8 text-slate-700" /><p className="mt-3 text-sm text-slate-500">Aún no hay registros</p></div>
               ) : (
                 registros.map((registro) => (
-                  <div key={registro.id} className="rounded-3xl border border-slate-800 bg-slate-900 p-4">
-                    <p className="font-semibold text-white">{registro.proceso} - {materialDisplayNames[registro.material]}</p>
-                    <p className="text-sm text-slate-400">{registro.peso_kg ?? 0} kg</p>
+                  <div key={registro.id} className="flex items-center justify-between rounded-xl border border-transparent bg-slate-950/50 p-3 transition hover:border-slate-800">
+                    <div><p className="text-sm font-semibold text-slate-200">{registro.proceso}</p><p className="text-xs text-slate-500">{materialDisplayNames[registro.material]}</p></div>
+                    <p className="font-bold text-white">{registro.peso_kg ?? 0} <span className="text-xs font-normal text-slate-500">kg</span></p>
                   </div>
                 ))
               )}
             </div>
           </aside>
         </section>
-      </div>
+      </main>
     </div>
   );
 }

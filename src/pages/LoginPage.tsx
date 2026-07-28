@@ -49,34 +49,34 @@ export function LoginPage() {
     <AuthLayout title="Inicio de Sesión" description="Accede al sistema de nómina protegido por contraseña.">
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
-          <label className="block text-sm font-medium text-slate-200">Correo o usuario</label>
+          <label className="block text-sm font-semibold text-slate-300">Correo electrónico</label>
           <input
             autoComplete="username"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-2 w-full rounded-2xl px-4 py-3"
+            className="field mt-2"
             placeholder="usuario@plasticcenter.com"
             type="email"
             required
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-200">Contraseña</label>
+          <label className="block text-sm font-semibold text-slate-300">Contraseña</label>
           <input
             autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="mt-2 w-full rounded-2xl px-4 py-3"
+            className="field mt-2"
             placeholder="********"
             type="password"
             required
           />
         </div>
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {error && <p role="alert" className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-300">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-2xl bg-sky-500 px-4 py-3 font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn-primary w-full"
         >
           {loading ? 'Verificando...' : 'Iniciar sesión'}
         </button>

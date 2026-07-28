@@ -3,12 +3,13 @@ import { LoginPage } from './pages/LoginPage';
 import { CargaDiariaPage } from './pages/CargaDiariaPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { useAuth } from './hooks/useAuth';
+import { LoadingScreen } from './components/ui/LoadingScreen';
 
 function App() {
   const { profile, loading } = useAuth();
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Cargando...</div>;
+    return <LoadingScreen />;
   }
 
   return (

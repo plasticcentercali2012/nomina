@@ -1,23 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
+:root { color-scheme: dark; font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif; }
+* { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+html { background: #020617; }
+body { @apply m-0 min-h-screen bg-slate-950 text-slate-100 antialiased; }
+button, input, select, textarea { font: inherit; }
+button { @apply outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950; }
+input, select, textarea {
+  @apply border border-slate-700/80 bg-slate-950/80 text-slate-100 outline-none transition;
+  @apply focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20;
+}
+input::placeholder, textarea::placeholder { @apply text-slate-600; }
+input:disabled, select:disabled { @apply cursor-not-allowed opacity-60; }
+input[type="checkbox"] { accent-color: #6366f1; }
+
+@layer components {
+  .app-bg { @apply min-h-screen bg-slate-950 text-slate-100; background-image: radial-gradient(circle at 15% -10%, rgba(79,70,229,.14), transparent 28rem); }
+  .card { @apply rounded-2xl border border-slate-800/80 bg-slate-900/70 shadow-xl shadow-black/10 backdrop-blur; }
+  .card-muted { @apply rounded-xl border border-slate-800/70 bg-slate-950/50; }
+  .field { @apply w-full rounded-xl px-3.5 py-3 text-sm; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl border-0 bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-950/30 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:bg-slate-800; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-300 transition hover:bg-rose-500/20; }
+  .eyebrow { @apply text-[11px] font-bold uppercase tracking-[.18em] text-indigo-400; }
+  .badge { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset; }
+  .badge-success { @apply badge bg-emerald-500/10 text-emerald-300 ring-emerald-500/20; }
+  .badge-warning { @apply badge bg-amber-500/10 text-amber-300 ring-amber-500/20; }
+  .toast { @apply fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-2xl border bg-slate-900/95 p-4 shadow-2xl backdrop-blur md:min-w-80; animation: toast-in .25s ease-out; }
+  .toast-success { @apply border-emerald-500/30 text-emerald-400; }
+  .toast-error { @apply border-rose-500/30 text-rose-400; }
 }
 
-body {
-  @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+table { @apply min-w-full; }
+thead { @apply bg-slate-950/60; }
+th { @apply whitespace-nowrap text-[11px] font-bold uppercase tracking-wider text-slate-500; }
+tbody tr { @apply transition-colors hover:bg-indigo-500/[.04]; }
+td { @apply text-slate-300; }
+
+@media (max-width: 700px) {
+  .responsive-table table, .responsive-table thead, .responsive-table tbody, .responsive-table th, .responsive-table td, .responsive-table tr { display: block; }
+  .responsive-table thead { @apply sr-only; }
+  .responsive-table tbody { @apply grid gap-3; }
+  .responsive-table tbody tr { @apply rounded-xl border border-slate-800 bg-slate-950/50 p-3; }
+  .responsive-table tbody td { @apply flex min-h-10 items-center justify-between gap-4 border-0 px-1 py-2 text-right; }
+  .responsive-table tbody td::before { content: attr(data-label); @apply text-left text-[10px] font-bold uppercase tracking-wider text-slate-500; }
 }
 
-button,
-input,
-select,
-textarea {
-  @apply border border-slate-700 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: #94a3b8;
-}
+.loading-bar { width: 45%; animation: loading 1.3s ease-in-out infinite; }
+@keyframes loading { 0% { transform: translateX(-110%); } 100% { transform: translateX(330%); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; } }
