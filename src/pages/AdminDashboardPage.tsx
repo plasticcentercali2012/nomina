@@ -28,6 +28,7 @@ export function AdminDashboardPage() {
   const [pagosAdicionales, setPagosAdicionales] = useState<PagoAdicional[]>([]);
   const [nominasSemanales, setNominasSemanales] = useState<NominaSemanal[]>([]);
   const [semanaInicio, setSemanaInicio] = useState('');
+  const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
   const [nuevoEmpleadoNombre, setNuevoEmpleadoNombre] = useState('');
   const [nuevoEmpleadoProceso, setNuevoEmpleadoProceso] = useState<Empleado['proceso_habitual']>('Picador');
   const [nuevoTarifaProceso, setNuevoTarifaProceso] = useState<Tarifa['proceso']>('Picador');
@@ -48,6 +49,8 @@ export function AdminDashboardPage() {
       return item.toISOString().slice(0, 10);
     });
   }, [semanaInicio]);
+
+  const isAdmin = profile?.rol === 'admin';
 
   async function handleSignOut() {
     await signOut?.();
@@ -75,7 +78,13 @@ export function AdminDashboardPage() {
       .select('*')
       .gte('fecha', weekDates[0])
       .lte('fecha', weekDates[weekDates.length - 1])
-      .then(({ data }) => data && setRegistros(data as RegistroDiario[]));
+      .then(({ data }) => {
+        if (data) {
+          const registrosData = data as RegistroDiario[];
+          setRegistros(registrosData);
+          setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
+        }
+      });
 
     supabase
       .from('pagos_adicionales')
@@ -204,6 +213,21 @@ export function AdminDashboardPage() {
     if (!error) {
       setPagosAdicionales((current) => current.filter((pago) => pago.id !== id));
     }
+  }
+
+  async function handleActualizarRegistroDiario(id: string) {
+    const value = registroEditValues[id];
+    if (!value) return;
+    const nuevoPeso = Number(value);
+    if (Number.isNaN(nuevoPeso) || nuevoPeso < 0) return;
+
+    setLoadingAction(true);
+    const { data, error } = await supabase.from('registros_diarios').update({ peso_kg: nuevoPeso }).eq('id', id);
+    if (!error && data?.[0]) {
+      setRegistros((current) => current.map((item) => (item.id === id ? { ...item, peso_kg: nuevoPeso } : item)));
+      setRegistroEditValues((current) => ({ ...current, [id]: nuevoPeso.toString() }));
+    }
+    setLoadingAction(false);
   }
 
   async function handleToggleActivo(empleado: Empleado) {
@@ -605,6 +629,62 @@ export function AdminDashboardPage() {
               </tbody>
             </table>
           </div>
+
+          {isAdmin && (
+            <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-semibold">Registros diarios</h3>
+                  <p className="mt-2 text-sm text-slate-400">Edita kilos directamente en los registros. Solo admins pueden guardar cambios.</p>
+                </div>
+                <span className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-300">Permiso admin requerido</span>
+              </div>
+              <div className="mt-6 overflow-x-auto">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-300">
+                      <th className="px-4 py-3">Fecha</th>
+                      <th className="px-4 py-3">Empleado</th>
+                      <th className="px-4 py-3">Proceso</th>
+                      <th className="px-4 py-3">Material</th>
+                      <th className="px-4 py-3">Kilos</th>
+                      <th className="px-4 py-3">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {registros.map((registro) => (
+                      <tr key={registro.id} className="border-b border-slate-800 hover:bg-slate-950/60">
+                        <td className="px-4 py-3">{registro.fecha}</td>
+                        <td className="px-4 py-3">{empleados.find((emp) => emp.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>
+                        <td className="px-4 py-3">{registro.proceso}</td>
+                        <td className="px-4 py-3">{materialDisplayNames[registro.material]}</td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={registroEditValues[registro.id] ?? registro.peso_kg?.toString() ?? ''}
+                            onChange={(event) => setRegistroEditValues((current) => ({ ...current, [registro.id]: event.target.value }))}
+                            className="w-28 rounded-2xl bg-slate-950 px-3 py-2 text-slate-100"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => handleActualizarRegistroDiario(registro.id)}
+                            disabled={loadingAction}
+                            className="rounded-2xl bg-sky-500 px-3 py-2 text-white transition hover:bg-sky-400 disabled:opacity-60"
+                          >
+                            Guardar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="mt-8 grid gap-6 xl:grid-cols-[2fr_1fr]">
             <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
