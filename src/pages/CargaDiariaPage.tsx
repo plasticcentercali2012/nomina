@@ -110,7 +110,7 @@ export function CargaDiariaPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100">
+    <div className="min-h-screen bg-[var(--color-lime-50,_#EBF6E6)] px-4 py-6 text-slate-950">
       <AppHeader
         title="Carga diaria"
         subtitle="Registra rápidamente el peso por empleado, proceso y material."
@@ -118,18 +118,18 @@ export function CargaDiariaPage() {
         email={user?.email ?? profile?.email}
         onSignOut={handleSignOut}
       />
-      <div className="mx-auto w-full max-w-5xl space-y-12">
-        <div className="grid gap-10 lg:grid-cols-2">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <p className="text-sm uppercase tracking-[0.25em] text-slate-400">Resumen diario</p>
-            <p className="mt-4 text-5xl font-semibold text-sky-400">{totalKilos.toFixed(0)}</p>
-            <p className="mt-2 text-sm text-slate-400">kg registrados hoy</p>
+      <div className="mx-auto w-full max-w-5xl space-y-10 mt-6">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl border border-slate-300 bg-[#B0BFC8] p-6 shadow-lg shadow-slate-400/20">
+            <p className="text-sm uppercase tracking-[0.25em] text-slate-700">Resumen diario</p>
+            <p className="mt-4 text-5xl font-semibold text-slate-950">{totalKilos.toFixed(0)}</p>
+            <p className="mt-2 text-sm text-slate-700">kg registrados hoy</p>
           </div>
 
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <p className="text-sm uppercase tracking-[0.25em] text-slate-400">Fecha de hoy</p>
-            <p className="mt-4 text-3xl font-semibold text-white">{fecha}</p>
-            <p className="mt-2 text-sm text-slate-500">Fecha fija, no editable</p>
+          <div className="rounded-3xl border border-slate-300 bg-[#B0BFC8] p-6 shadow-lg shadow-slate-400/20">
+            <p className="text-sm uppercase tracking-[0.25em] text-slate-700">Fecha de hoy</p>
+            <p className="mt-4 text-3xl font-semibold text-slate-950">{fecha}</p>
+            <p className="mt-2 text-sm text-slate-600">Fecha fija, no editable</p>
           </div>
         </div>
 

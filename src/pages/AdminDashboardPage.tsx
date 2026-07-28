@@ -28,6 +28,13 @@ export function AdminDashboardPage() {
   const [pagosAdicionales, setPagosAdicionales] = useState<PagoAdicional[]>([]);
   const [nominasSemanales, setNominasSemanales] = useState<NominaSemanal[]>([]);
   const [semanaInicio, setSemanaInicio] = useState('');
+  const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
+  const [selectedWeekDate, setSelectedWeekDate] = useState('');
+  const [adminRegistroEmpleadoId, setAdminRegistroEmpleadoId] = useState('');
+  const [adminRegistroDate, setAdminRegistroDate] = useState(new Date().toISOString().slice(0, 10));
+  const [adminRegistroProceso, setAdminRegistroProceso] = useState<RegistroDiario['proceso']>('Picador');
+  const [adminRegistroMaterial, setAdminRegistroMaterial] = useState<RegistroDiario['material']>('Poli');
+  const [adminRegistroKilos, setAdminRegistroKilos] = useState('');
   const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
   const [nuevoEmpleadoNombre, setNuevoEmpleadoNombre] = useState('');
   const [nuevoEmpleadoProceso, setNuevoEmpleadoProceso] = useState<Empleado['proceso_habitual']>('Picador');
@@ -98,6 +105,65 @@ export function AdminDashboardPage() {
       .eq('semana_inicio', weekDates[0])
       .then(({ data }) => data && setNominasSemanales(data as NominaSemanal[]));
   }, [weekDates]);
+
+  useEffect(() => {
+    if (empleados.length && !selectedEmpleadoId) {
+      setSelectedEmpleadoId(empleados[0].id);
+    }
+    if (empleados.length && !adminRegistroEmpleadoId) {
+      setAdminRegistroEmpleadoId(empleados[0].id);
+    }
+  }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
+
+  useEffect(() => {
+    if (weekDates.length && !selectedWeekDate) {
+      setSelectedWeekDate(weekDates[0]);
+      setAdminRegistroDate(weekDates[0]);
+    }
+  }, [weekDates, selectedWeekDate]);
+
+  useEffect(() => {
+    const empleado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
+    if (empleado) {
+      setAdminRegistroProceso(empleado.proceso_habitual);
+    }
+  }, [adminRegistroEmpleadoId, empleados]);
+
+  const registrosPorEmpleadoYDia = useMemo(() => {
+    if (!selectedEmpleadoId || !selectedWeekDate) return [];
+    return registros.filter(
+      (item) => item.empleado_id === selectedEmpleadoId && item.fecha === selectedWeekDate
+    );
+  }, [registros, selectedEmpleadoId, selectedWeekDate]);
+
+  const selectedEmpleadoName = useMemo(
+    () => empleados.find((item) => item.id === selectedEmpleadoId)?.nombre ?? '',
+    [empleados, selectedEmpleadoId]
+  );
+
+  async function handleAdminCrearRegistro() {
+    if (!adminRegistroEmpleadoId || !adminRegistroKilos) return;
+    const kilos = Number(adminRegistroKilos);
+    if (Number.isNaN(kilos) || kilos < 0) return;
+
+    setLoadingAction(true);
+    const newRecord = {
+      empleado_id: adminRegistroEmpleadoId,
+      fecha: adminRegistroDate,
+      proceso: adminRegistroProceso,
+      material: adminRegistroMaterial,
+      peso_kg: kilos,
+      cantidad_bultos: null,
+      creado_por: profile?.id ?? ''
+    };
+
+    const { data, error } = await supabase.from('registros_diarios').insert(newRecord);
+    if (!error && data?.[0]) {
+      setRegistros((current) => [...current, data[0] as RegistroDiario]);
+      setAdminRegistroKilos('');
+    }
+    setLoadingAction(false);
+  }
 
   const estadisticas = useMemo(() => {
     return {
@@ -630,14 +696,168 @@ export function AdminDashboardPage() {
             </table>
           </div>
 
+          <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold">Detalle por empleado</h3>
+                <p className="mt-2 text-sm text-slate-400">Selecciona empleado y día de la semana para ver todos los registros exactos tal como se ingresaron.</p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">Empleado</span>
+                <select
+                  value={selectedEmpleadoId}
+                  onChange={(event) => setSelectedEmpleadoId(event.target.value)}
+                  className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                >
+                  {empleados.map((empleado) => (
+                    <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">Fecha</span>
+                <input
+                  type="date"
+                  value={selectedWeekDate}
+                  min={weekDates[0]}
+                  max={weekDates[weekDates.length - 1]}
+                  onChange={(event) => setSelectedWeekDate(event.target.value)}
+                  className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-slate-100"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-4 text-sm text-slate-300">
+              <div className="rounded-3xl bg-slate-900/95 p-4">
+                <p className="text-slate-500">Empleado</p>
+                <p className="mt-2 font-semibold text-white">{selectedEmpleadoName || 'Sin empleado'}</p>
+              </div>
+              <div className="rounded-3xl bg-slate-900/95 p-4">
+                <p className="text-slate-500">Fecha seleccionada</p>
+                <p className="mt-2 font-semibold text-white">{selectedWeekDate || 'Sin fecha'}</p>
+              </div>
+              <div className="rounded-3xl bg-slate-900/95 p-4">
+                <p className="text-slate-500">Día</p>
+                <p className="mt-2 font-semibold text-white">{weekDates.includes(selectedWeekDate) ? diasSemana[weekDates.indexOf(selectedWeekDate)] : '-'}</p>
+              </div>
+              <div className="rounded-3xl bg-slate-900/95 p-4">
+                <p className="text-slate-500">Registros</p>
+                <p className="mt-2 font-semibold text-white">{registrosPorEmpleadoYDia.length}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 overflow-x-auto">
+              {registrosPorEmpleadoYDia.length === 0 ? (
+                <p className="rounded-3xl border border-slate-800 bg-slate-900/95 p-4 text-sm text-slate-400">No hay registros para este empleado y día.</p>
+              ) : (
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-300">
+                      <th className="px-4 py-3">Proceso</th>
+                      <th className="px-4 py-3">Material</th>
+                      <th className="px-4 py-3">Kilos</th>
+                      <th className="px-4 py-3">Cantidad</th>
+                      <th className="px-4 py-3">Creado por</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {registrosPorEmpleadoYDia.map((registro) => (
+                      <tr key={registro.id} className="border-b border-slate-800 hover:bg-slate-950/60">
+                        <td className="px-4 py-3">{registro.proceso}</td>
+                        <td className="px-4 py-3">{materialDisplayNames[registro.material]}</td>
+                        <td className="px-4 py-3">{registro.peso_kg?.toFixed(0) ?? 0} kg</td>
+                        <td className="px-4 py-3">{registro.cantidad_bultos ?? '-'}</td>
+                        <td className="px-4 py-3">{registro.creado_por || 'N/A'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
           {isAdmin && (
             <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/20">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-xl font-semibold">Registros diarios</h3>
-                  <p className="mt-2 text-sm text-slate-400">Edita kilos directamente en los registros. Solo admins pueden guardar cambios.</p>
+                  <h3 className="text-xl font-semibold">Ingreso libre de kilos</h3>
+                  <p className="mt-2 text-sm text-slate-400">Como admin puedes registrar un peso para cualquier fecha. Replica la pantalla de carga diaria pero con fecha habilitada.</p>
                 </div>
-                <span className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-300">Permiso admin requerido</span>
+                <span className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-300">Solo admin</span>
+              </div>
+
+              <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Fecha</span>
+                  <input
+                    type="date"
+                    value={adminRegistroDate}
+                    onChange={(event) => setAdminRegistroDate(event.target.value)}
+                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Empleado</span>
+                  <select
+                    value={adminRegistroEmpleadoId}
+                    onChange={(event) => setAdminRegistroEmpleadoId(event.target.value)}
+                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                  >
+                    {empleados.map((empleado) => (
+                      <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Kilos / gramos</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={adminRegistroKilos}
+                    onChange={(event) => setAdminRegistroKilos(event.target.value)}
+                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                    placeholder="0.0"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Proceso</span>
+                  <select
+                    value={adminRegistroProceso}
+                    onChange={(event) => setAdminRegistroProceso(event.target.value as RegistroDiario['proceso'])}
+                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                  >
+                    {procesos.map((proceso) => (
+                      <option key={proceso} value={proceso}>{proceso}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Material</span>
+                  <select
+                    value={adminRegistroMaterial}
+                    onChange={(event) => setAdminRegistroMaterial(event.target.value as RegistroDiario['material'])}
+                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
+                  >
+                    {materiales.map((material) => (
+                      <option key={material} value={material}>{materialDisplayNames[material]}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAdminCrearRegistro}
+                  disabled={loadingAction}
+                  className="h-full rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                >
+                  Registrar kilos
+                </button>
               </div>
               <div className="mt-6 overflow-x-auto">
                 <table className="w-full border-collapse text-left text-sm">
