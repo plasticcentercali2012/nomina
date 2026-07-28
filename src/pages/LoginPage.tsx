@@ -35,13 +35,29 @@ export function LoginPage() {
       return;
     }
 
-    const { data: profile } = await supabase.from('usuarios_sistema').select('rol').eq('id', userId).single();
+    const { data: profile, error: profileError } = await supabase
+      .from('usuarios_sistema')
+      .select('rol')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
+      setError('El usuario inició sesión, pero no tiene un perfil válido en usuarios_sistema.');
+      setLoading(false);
+      return;
+    }
+
     const role = profile?.rol;
 
     if (role === 'encargado') {
       navigate('/carga-diaria');
-    } else {
+    } else if (role === 'admin' || role === 'gerencial') {
       navigate('/admin');
+    } else {
+      await supabase.auth.signOut();
+      setError('El perfil del usuario no tiene un rol permitido.');
+      setLoading(false);
     }
   }
 

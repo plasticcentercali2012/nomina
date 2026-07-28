@@ -6,6 +6,7 @@ import { Empleado, NominaSemanal, PagoAdicional, RegistroDiario, Tarifa, Usuario
 import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
+import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 const procesos = ['Picador', 'Lavador', 'Aglutinador','Encargado'] as const;
@@ -42,7 +43,7 @@ export function AdminDashboardPage() {
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
   const [selectedWeekDate, setSelectedWeekDate] = useState('');
   const [adminRegistroEmpleadoId, setAdminRegistroEmpleadoId] = useState('');
-  const [adminRegistroDate, setAdminRegistroDate] = useState(new Date().toISOString().slice(0, 10));
+  const [adminRegistroDate, setAdminRegistroDate] = useState(formatLocalDate(new Date()));
   const [adminRegistroProceso, setAdminRegistroProceso] = useState<RegistroDiario['proceso']>('Picador');
   const [adminRegistroMaterial, setAdminRegistroMaterial] = useState<RegistroDiario['material']>('Poli');
   const [adminRegistroKilos, setAdminRegistroKilos] = useState('');
@@ -58,17 +59,17 @@ export function AdminDashboardPage() {
   const [loadingAction, setLoadingAction] = useState(false);
   const [activeTab, setActiveTab] = useState<'gestion' | 'tarifas' | 'consolidado' | 'analitica'>('gestion');
   const [periodoAnalitica, setPeriodoAnalitica] = useState<'dia' | 'semana' | 'mes'>('semana');
-  const [fechaAnalitica, setFechaAnalitica] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaAnalitica, setFechaAnalitica] = useState(formatLocalDate(new Date()));
   const [registrosAnalitica, setRegistrosAnalitica] = useState<RegistroDiario[]>([]);
   const [cargandoAnalitica, setCargandoAnalitica] = useState(false);
 
   const weekDates = useMemo(() => {
     if (!semanaInicio) return [];
-    const start = new Date(semanaInicio);
+    const start = parseLocalDate(semanaInicio);
     return diasSemana.map((_, index) => {
       const item = new Date(start);
       item.setDate(start.getDate() + index);
-      return item.toISOString().slice(0, 10);
+      return formatLocalDate(item);
     });
   }, [semanaInicio]);
 
@@ -90,7 +91,7 @@ export function AdminDashboardPage() {
     const monday = new Date();
     const diff = monday.getDay() === 0 ? -6 : 1 - monday.getDay();
     monday.setDate(monday.getDate() + diff);
-    setSemanaInicio(monday.toISOString().slice(0, 10));
+    setSemanaInicio(formatLocalDate(monday));
   }, []);
 
   useEffect(() => {
@@ -142,7 +143,7 @@ export function AdminDashboardPage() {
       inicio = new Date(base.getFullYear(), base.getMonth(), 1, 12);
       fin = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12);
     }
-    return { inicio: inicio.toISOString().slice(0, 10), fin: fin.toISOString().slice(0, 10) };
+    return { inicio: formatLocalDate(inicio), fin: formatLocalDate(fin) };
   }, [fechaAnalitica, periodoAnalitica]);
 
   useEffect(() => {

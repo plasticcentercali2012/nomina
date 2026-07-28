@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { formatLocalDate } from '../lib/dateUtils';
 import { AppHeader } from '../components/AppHeader';
 import { Empleado, Material, Proceso, RegistroDiario } from '../types';
 import { useAuth } from '../hooks/useAuth';
@@ -20,7 +21,7 @@ export function CargaDiariaPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
-  const [fecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha] = useState(formatLocalDate(new Date()));
   const [empleadoId, setEmpleadoId] = useState('');
   const [proceso, setProceso] = useState<Proceso>('Picador');
   const [material, setMaterial] = useState<Material>('Poli');

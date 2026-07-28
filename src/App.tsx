@@ -14,7 +14,14 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/login"
+        element={
+          profile
+            ? <Navigate to={profile.rol === 'encargado' ? '/carga-diaria' : '/admin'} replace />
+            : <LoginPage />
+        }
+      />
       <Route
         path="/carga-diaria"
         element={profile?.rol === 'encargado' ? <CargaDiariaPage /> : <Navigate to="/login" replace />}
