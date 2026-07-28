@@ -2,20 +2,33 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { AppHeader } from '../components/AppHeader';
-import { Empleado, NominaSemanal, PagoAdicional, RegistroDiario, Tarifa, UsuarioSistema } from '../types';
+import { Empleado, NominaSemanal, PagoAdicional, Proceso, RegistroDiario, Tarifa, UsuarioSistema } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
+import { Toast } from '../components/ui/Toast';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
-const procesos = ['Picador', 'Lavador', 'Aglutinador','Encargado'] as const;
+const procesos: RegistroDiario['proceso'][] = ['Picador', 'Lavador', 'Aglutinador'];
 const materiales = ['Poli', 'M', 'T'] as const;
 const materialDisplayNames: Record<typeof materiales[number], string> = {
   Poli: 'Policolor',
   M: 'Mono',
   T: 'Termo',
 };
+
+type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
+  empleado_procesos?: Array<{ proceso: Proceso }>;
+};
+
+function normalizeEmpleado(row: EmpleadoRow): Empleado {
+  const asignados = row.empleado_procesos?.map((item) => item.proceso) ?? [];
+  return {
+    ...row,
+    procesos_asignados: asignados.length ? asignados : [row.proceso_habitual]
+  };
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
@@ -48,8 +61,9 @@ export function AdminDashboardPage() {
   const [adminRegistroMaterial, setAdminRegistroMaterial] = useState<RegistroDiario['material']>('Poli');
   const [adminRegistroKilos, setAdminRegistroKilos] = useState('');
   const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
+  const [registroProcesoEditValues, setRegistroProcesoEditValues] = useState<Record<string, Proceso>>({});
   const [nuevoEmpleadoNombre, setNuevoEmpleadoNombre] = useState('');
-  const [nuevoEmpleadoProceso, setNuevoEmpleadoProceso] = useState<Empleado['proceso_habitual']>('Picador');
+  const [nuevoEmpleadoProcesos, setNuevoEmpleadoProcesos] = useState<Proceso[]>(['Picador']);
   const [nuevoTarifaProceso, setNuevoTarifaProceso] = useState<Tarifa['proceso']>('Picador');
   const [nuevoTarifaMaterial, setNuevoTarifaMaterial] = useState<Tarifa['material']>('Poli');
   const [nuevoTarifaPrecio, setNuevoTarifaPrecio] = useState<number>(0);
@@ -62,6 +76,8 @@ export function AdminDashboardPage() {
   const [fechaAnalitica, setFechaAnalitica] = useState(formatLocalDate(new Date()));
   const [registrosAnalitica, setRegistrosAnalitica] = useState<RegistroDiario[]>([]);
   const [cargandoAnalitica, setCargandoAnalitica] = useState(false);
+  const [rangoAnaliticaCargado, setRangoAnaliticaCargado] = useState('');
+  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const weekDates = useMemo(() => {
     if (!semanaInicio) return [];
@@ -75,6 +91,16 @@ export function AdminDashboardPage() {
 
   const isAdmin = profile?.rol === 'admin';
   const isGerencial = profile?.rol === 'gerencial';
+
+  useEffect(() => {
+    if (!notification) return;
+    const timer = window.setTimeout(() => setNotification(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notification]);
+
+  function notify(type: 'success' | 'error', message: string) {
+    setNotification({ type, message });
+  }
 
   useEffect(() => {
     if (isGerencial && activeTab !== 'consolidado' && activeTab !== 'analitica') {
@@ -95,7 +121,11 @@ export function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    supabase.from('empleados').select('*').order('nombre', { ascending: true }).then(({ data }) => data && setEmpleados(data as Empleado[]));
+    supabase
+      .from('empleados')
+      .select('*, empleado_procesos(proceso)')
+      .order('nombre', { ascending: true })
+      .then(({ data }) => data && setEmpleados((data as EmpleadoRow[]).map(normalizeEmpleado)));
     supabase.from('tarifas').select('*').order('proceso', { ascending: true }).order('material', { ascending: true }).then(({ data }) => data && setTarifas(data as Tarifa[]));
     supabase.from('usuarios_sistema').select('*').order('email', { ascending: true }).then(({ data }) => data && setUsuarios(data as UsuarioSistema[]));
   }, []);
@@ -113,6 +143,7 @@ export function AdminDashboardPage() {
           const registrosData = data as RegistroDiario[];
           setRegistros(registrosData);
           setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
+          setRegistroProcesoEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.proceso])));
         }
       });
 
@@ -148,6 +179,8 @@ export function AdminDashboardPage() {
 
   useEffect(() => {
     if (activeTab !== 'analitica') return;
+    const claveRango = `${rangoAnalitica.inicio}:${rangoAnalitica.fin}`;
+    if (rangoAnaliticaCargado === claveRango) return;
     setCargandoAnalitica(true);
     supabase
       .from('registros_diarios')
@@ -157,21 +190,27 @@ export function AdminDashboardPage() {
       .order('fecha', { ascending: true })
       .then(({ data }) => {
         setRegistrosAnalitica((data as RegistroDiario[]) ?? []);
+        setRangoAnaliticaCargado(claveRango);
         setCargandoAnalitica(false);
       });
-  }, [activeTab, rangoAnalitica]);
+  }, [activeTab, rangoAnalitica, rangoAnaliticaCargado]);
 
   useEffect(() => {
-    if (empleados.length && !selectedEmpleadoId) {
+    if (!empleados.length) {
+      setSelectedEmpleadoId('');
+      setAdminRegistroEmpleadoId('');
+      return;
+    }
+    if (!empleados.some((empleado) => empleado.id === selectedEmpleadoId)) {
       setSelectedEmpleadoId(empleados[0].id);
     }
-    if (empleados.length && !adminRegistroEmpleadoId) {
+    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId)) {
       setAdminRegistroEmpleadoId(empleados[0].id);
     }
   }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
 
   useEffect(() => {
-    if (weekDates.length && !selectedWeekDate) {
+    if (weekDates.length && !weekDates.includes(selectedWeekDate)) {
       setSelectedWeekDate(weekDates[0]);
       setAdminRegistroDate(weekDates[0]);
     }
@@ -180,7 +219,7 @@ export function AdminDashboardPage() {
   useEffect(() => {
     const empleado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
     if (empleado) {
-      setAdminRegistroProceso(empleado.proceso_habitual);
+      setAdminRegistroProceso(empleado.procesos_asignados[0] ?? empleado.proceso_habitual);
     }
   }, [adminRegistroEmpleadoId, empleados]);
 
@@ -212,10 +251,31 @@ export function AdminDashboardPage() {
       creado_por: profile?.id ?? ''
     };
 
-    const { data, error } = await supabase.from('registros_diarios').insert(newRecord);
-    if (!error && data?.[0]) {
-      setRegistros((current) => [...current, data[0] as RegistroDiario]);
+    const { data, error } = await supabase
+      .from('registros_diarios')
+      .insert(newRecord)
+      .select()
+      .single();
+    if (!error && data) {
+      const registroCreado = data as RegistroDiario;
+      if (weekDates.includes(registroCreado.fecha)) {
+        setRegistros((current) => [...current, registroCreado]);
+        setRegistroEditValues((current) => ({
+          ...current,
+          [registroCreado.id]: registroCreado.peso_kg?.toString() ?? ''
+        }));
+        setRegistroProcesoEditValues((current) => ({
+          ...current,
+          [registroCreado.id]: registroCreado.proceso
+        }));
+      }
+      if (registroCreado.fecha >= rangoAnalitica.inicio && registroCreado.fecha <= rangoAnalitica.fin) {
+        setRegistrosAnalitica((current) => [...current, registroCreado]);
+      }
       setAdminRegistroKilos('');
+      notify('success', 'El registro de kilos fue creado y los consolidados se actualizaron.');
+    } else {
+      notify('error', `No se pudo crear el registro: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -233,6 +293,56 @@ export function AdminDashboardPage() {
     };
   }, [registrosAnalitica]);
 
+  const resumenProcesoMaterialSemana = useMemo(
+    () => procesos.flatMap((proceso) =>
+      materiales.map((material) => {
+        const kilosPorDia = weekDates.map((fecha) =>
+          registros
+            .filter(
+              (registro) =>
+                registro.fecha === fecha
+                && registro.proceso === proceso
+                && registro.material === material
+            )
+            .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0)
+        );
+        const totalKilos = kilosPorDia.reduce((total, kilos) => total + kilos, 0);
+
+        return {
+          proceso,
+          material,
+          kilosPorDia,
+          totalKilos,
+          totalPagar: totalKilos * getTarifaPrecio(proceso, material)
+        };
+      })
+    ),
+    [registros, tarifas, weekDates]
+  );
+
+  const totalKilosSemana = useMemo(
+    () => registros
+      .filter((registro) => weekDates.includes(registro.fecha))
+      .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0),
+    [registros, weekDates]
+  );
+
+  const totalPagosAdicionalesSemana = useMemo(
+    () => pagosAdicionales.reduce((total, pago) => total + pago.valor, 0),
+    [pagosAdicionales]
+  );
+
+  const totalAPagarSemana = useMemo(
+    () => registros
+      .filter((registro) => weekDates.includes(registro.fecha))
+      .reduce(
+        (total, registro) =>
+          total + ((registro.peso_kg ?? 0) * getTarifaPrecio(registro.proceso, registro.material)),
+        totalPagosAdicionalesSemana
+      ),
+    [registros, tarifas, totalPagosAdicionalesSemana, weekDates]
+  );
+
   function getDetallesDelDia(empleadoId: string, fecha: string) {
     return registros
       .filter((item) => item.empleado_id === empleadoId && item.fecha === fecha)
@@ -244,6 +354,9 @@ export function AdminDashboardPage() {
     const { error } = await supabase.from('tarifas').update({ precio_unidad: precioUnificado }).eq('id', id);
     if (!error) {
       setTarifas((current) => current.map((tarifa) => (tarifa.id === id ? { ...tarifa, precio_unidad: precioUnificado } : tarifa)));
+      notify('success', 'La tarifa fue actualizada en todos los consolidados.');
+    } else {
+      notify('error', `No se pudo actualizar la tarifa: ${error.message}`);
     }
     setLoadingAction(false);
   }
@@ -253,12 +366,19 @@ export function AdminDashboardPage() {
     if (!nuevoTarifaProceso || !nuevoTarifaMaterial || nuevoTarifaPrecio <= 0) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('tarifas').insert([{ proceso: nuevoTarifaProceso, material: nuevoTarifaMaterial, precio_unidad: nuevoTarifaPrecio }]);
-    if (data?.[0]) {
-      setTarifas((current) => [...current, data[0]]);
+    const { data, error } = await supabase
+      .from('tarifas')
+      .insert([{ proceso: nuevoTarifaProceso, material: nuevoTarifaMaterial, precio_unidad: nuevoTarifaPrecio }])
+      .select()
+      .single();
+    if (!error && data) {
+      setTarifas((current) => [...current, data as Tarifa]);
       setNuevoTarifaProceso('Picador');
       setNuevoTarifaMaterial('Poli');
       setNuevoTarifaPrecio(0);
+      notify('success', 'La tarifa fue creada correctamente.');
+    } else {
+      notify('error', `No se pudo crear la tarifa: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -267,19 +387,50 @@ export function AdminDashboardPage() {
     const { error } = await supabase.from('tarifas').delete().eq('id', id);
     if (!error) {
       setTarifas((current) => current.filter((tarifa) => tarifa.id !== id));
+      notify('success', 'La tarifa fue eliminada.');
+    } else {
+      notify('error', `No se pudo eliminar la tarifa: ${error.message}`);
     }
   }
 
   async function handleCrearEmpleado(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!nuevoEmpleadoNombre.trim()) return;
+    if (!nuevoEmpleadoNombre.trim() || !nuevoEmpleadoProcesos.length) {
+      notify('error', 'Ingresa el nombre y selecciona al menos un proceso.');
+      return;
+    }
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('empleados').insert([{ nombre: nuevoEmpleadoNombre.trim(), proceso_habitual: nuevoEmpleadoProceso, activo: true }]);
-    if (data?.[0]) {
-      setEmpleados((current) => [...current, data[0]]);
-      setNuevoEmpleadoNombre('');
-      setNuevoEmpleadoProceso('Picador');
+    const { data, error } = await supabase
+      .from('empleados')
+      .insert([{
+        nombre: nuevoEmpleadoNombre.trim(),
+        proceso_habitual: nuevoEmpleadoProcesos[0],
+        activo: true
+      }])
+      .select()
+      .single();
+    if (!error && data) {
+      const { error: procesosError } = await supabase
+        .from('empleado_procesos')
+        .insert(nuevoEmpleadoProcesos.map((proceso) => ({ empleado_id: data.id, proceso })));
+      if (!procesosError) {
+        setEmpleados((current) => [
+          ...current,
+          normalizeEmpleado({
+            ...(data as Omit<Empleado, 'procesos_asignados'>),
+            empleado_procesos: nuevoEmpleadoProcesos.map((proceso) => ({ proceso }))
+          })
+        ]);
+        setNuevoEmpleadoNombre('');
+        setNuevoEmpleadoProcesos(['Picador']);
+        notify('success', 'El empleado fue creado con sus procesos asignados.');
+      } else {
+        await supabase.from('empleados').delete().eq('id', data.id);
+        notify('error', `No se pudieron asignar los procesos: ${procesosError.message}`);
+      }
+    } else {
+      notify('error', `No se pudo crear el empleado: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -290,12 +441,19 @@ export function AdminDashboardPage() {
     if (!pagoEmpleadoId || !nuevoPagoDescripcion.trim() || valorPago <= 0) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('pagos_adicionales').insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], descripcion: nuevoPagoDescripcion.trim(), valor: valorPago }]);
-    if (data?.[0]) {
-      setPagosAdicionales((current) => [...current, data[0]]);
+    const { data, error } = await supabase
+      .from('pagos_adicionales')
+      .insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], descripcion: nuevoPagoDescripcion.trim(), valor: valorPago }])
+      .select()
+      .single();
+    if (!error && data) {
+      setPagosAdicionales((current) => [...current, data as PagoAdicional]);
       setNuevoPagoDescripcion('');
       setNuevoPagoValor('');
       setPagoEmpleadoId('');
+      notify('success', 'El pago adicional fue agregado y los totales se actualizaron.');
+    } else {
+      notify('error', `No se pudo agregar el pago: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -322,10 +480,15 @@ export function AdminDashboardPage() {
       };
     });
 
-    const { error } = await supabase.from('nominas_semanales').upsert(insertData, { onConflict: 'semana_inicio' });
-    if (!error) {
-      const { data } = await supabase.from('nominas_semanales').select('*').eq('semana_inicio', weekDates[0]);
-      if (data) setNominasSemanales(data as NominaSemanal[]);
+    const { data, error } = await supabase
+      .from('nominas_semanales')
+      .upsert(insertData, { onConflict: 'semana_inicio,empleado_id' })
+      .select();
+    if (!error && data) {
+      setNominasSemanales(data as NominaSemanal[]);
+      notify('success', 'La nómina semanal fue guardada correctamente.');
+    } else {
+      notify('error', `No se pudo guardar la nómina: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -334,45 +497,163 @@ export function AdminDashboardPage() {
     const { error } = await supabase.from('pagos_adicionales').delete().eq('id', id);
     if (!error) {
       setPagosAdicionales((current) => current.filter((pago) => pago.id !== id));
+      notify('success', 'El pago adicional fue eliminado y los totales se actualizaron.');
+    } else {
+      notify('error', `No se pudo eliminar el pago: ${error.message}`);
     }
   }
 
   async function handleActualizarRegistroDiario(id: string) {
     const value = registroEditValues[id];
+    const nuevoProceso = registroProcesoEditValues[id];
     if (!value) return;
     const nuevoPeso = Number(value);
-    if (Number.isNaN(nuevoPeso) || nuevoPeso < 0) return;
+    if (Number.isNaN(nuevoPeso) || nuevoPeso < 0 || !nuevoProceso) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('registros_diarios').update({ peso_kg: nuevoPeso }).eq('id', id);
-    if (!error && data?.[0]) {
-      setRegistros((current) => current.map((item) => (item.id === id ? { ...item, peso_kg: nuevoPeso } : item)));
+    const { data, error } = await supabase
+      .from('registros_diarios')
+      .update({ peso_kg: nuevoPeso, proceso: nuevoProceso })
+      .eq('id', id)
+      .select()
+      .single();
+    if (!error && data) {
+      const registroActualizado = data as RegistroDiario;
+      setRegistros((current) => current.map((item) => (item.id === id ? registroActualizado : item)));
+      setRegistrosAnalitica((current) =>
+        current.map((item) => (item.id === id ? registroActualizado : item))
+      );
       setRegistroEditValues((current) => ({ ...current, [id]: nuevoPeso.toString() }));
+      setRegistroProcesoEditValues((current) => ({ ...current, [id]: nuevoProceso }));
+      notify('success', 'El registro fue actualizado en todas las vistas.');
+    } else {
+      notify('error', `No se pudo actualizar el registro: ${error?.message ?? 'error desconocido'}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleEliminarRegistroDiario(id: string) {
+    if (!window.confirm('¿Eliminar este registro de kilos? Esta acción no se puede deshacer.')) return;
+
+    setLoadingAction(true);
+    const { error } = await supabase.from('registros_diarios').delete().eq('id', id);
+    if (!error) {
+      setRegistros((current) => current.filter((item) => item.id !== id));
+      setRegistrosAnalitica((current) => current.filter((item) => item.id !== id));
+      setRegistroEditValues((current) => {
+        const siguiente = { ...current };
+        delete siguiente[id];
+        return siguiente;
+      });
+      setRegistroProcesoEditValues((current) => {
+        const siguiente = { ...current };
+        delete siguiente[id];
+        return siguiente;
+      });
+      notify('success', 'El registro fue eliminado de todas las vistas.');
+    } else {
+      notify('error', `No se pudo eliminar el registro: ${error.message}`);
     }
     setLoadingAction(false);
   }
 
   async function handleToggleActivo(empleado: Empleado) {
-    const { data, error } = await supabase.from('empleados').update({ activo: !empleado.activo }).eq('id', empleado.id);
-    if (!error && data?.[0]) {
-      setEmpleados((current) => current.map((item) => (item.id === empleado.id ? { ...item, activo: (data[0] as Empleado).activo } : item)));
+    const { data, error } = await supabase
+      .from('empleados')
+      .update({ activo: !empleado.activo })
+      .eq('id', empleado.id)
+      .select()
+      .single();
+    if (!error && data) {
+      const actualizado = { ...(data as Omit<Empleado, 'procesos_asignados'>), procesos_asignados: empleado.procesos_asignados };
+      setEmpleados((current) => current.map((item) => (item.id === empleado.id ? actualizado : item)));
+      notify('success', `El empleado fue marcado como ${actualizado.activo ? 'activo' : 'inactivo'}.`);
+    } else {
+      notify('error', `No se pudo cambiar el estado del empleado: ${error?.message ?? 'error desconocido'}`);
     }
   }
 
   async function handleActualizarEmpleado(empleado: Empleado) {
+    if (!empleado.procesos_asignados.length) {
+      notify('error', 'El empleado debe tener al menos un proceso asignado.');
+      return;
+    }
+
     setLoadingAction(true);
-    const { data, error } = await supabase.from('empleados').update({ nombre: empleado.nombre, proceso_habitual: empleado.proceso_habitual, activo: empleado.activo }).eq('id', empleado.id);
-    if (!error && data?.[0]) {
-      setEmpleados((current) => current.map((item) => (item.id === empleado.id ? data[0] : item)));
+    const { data, error } = await supabase
+      .from('empleados')
+      .update({
+        nombre: empleado.nombre,
+        proceso_habitual: empleado.procesos_asignados[0],
+        activo: empleado.activo
+      })
+      .eq('id', empleado.id)
+      .select()
+      .single();
+    if (!error && data) {
+      const { error: upsertError } = await supabase
+        .from('empleado_procesos')
+        .upsert(
+          empleado.procesos_asignados.map((proceso) => ({ empleado_id: empleado.id, proceso })),
+          { onConflict: 'empleado_id,proceso' }
+        );
+      const procesosEliminados = procesos.filter((proceso) => !empleado.procesos_asignados.includes(proceso));
+      const { error: deleteError } = procesosEliminados.length
+        ? await supabase
+          .from('empleado_procesos')
+          .delete()
+          .eq('empleado_id', empleado.id)
+          .in('proceso', procesosEliminados)
+        : { error: null };
+
+      if (!upsertError && !deleteError) {
+        const actualizado: Empleado = {
+          ...(data as Omit<Empleado, 'procesos_asignados'>),
+          procesos_asignados: empleado.procesos_asignados
+        };
+        setEmpleados((current) => current.map((item) => (item.id === empleado.id ? actualizado : item)));
+        notify('success', 'El empleado y sus procesos fueron actualizados.');
+      } else {
+        notify('error', `No se pudieron actualizar los procesos: ${(upsertError ?? deleteError)?.message}`);
+      }
+    } else {
+      notify('error', `No se pudo actualizar el empleado: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
 
   async function handleEliminarEmpleado(id: string) {
+    if (!window.confirm('¿Eliminar este empleado y todos sus registros asociados?')) return;
+
     const { error } = await supabase.from('empleados').delete().eq('id', id);
     if (!error) {
       setEmpleados((current) => current.filter((item) => item.id !== id));
+      setRegistros((current) => current.filter((item) => item.empleado_id !== id));
+      setRegistrosAnalitica((current) => current.filter((item) => item.empleado_id !== id));
+      setPagosAdicionales((current) => current.filter((item) => item.empleado_id !== id));
+      setNominasSemanales((current) => current.filter((item) => item.empleado_id !== id));
+      notify('success', 'El empleado y sus registros asociados fueron eliminados.');
+    } else {
+      notify('error', `No se pudo eliminar el empleado: ${error.message}`);
     }
+  }
+
+  function toggleProcesoEmpleado(empleadoId: string, proceso: Proceso) {
+    setEmpleados((current) => current.map((empleado) => {
+      if (empleado.id !== empleadoId) return empleado;
+      const asignados = empleado.procesos_asignados.includes(proceso)
+        ? empleado.procesos_asignados.filter((item) => item !== proceso)
+        : [...empleado.procesos_asignados, proceso];
+      return { ...empleado, procesos_asignados: asignados };
+    }));
+  }
+
+  function toggleNuevoEmpleadoProceso(proceso: Proceso) {
+    setNuevoEmpleadoProcesos((current) =>
+      current.includes(proceso)
+        ? current.filter((item) => item !== proceso)
+        : [...current, proceso]
+    );
   }
 
   function getTarifaPrecio(proceso: string, material: string) {
@@ -437,6 +718,13 @@ export function AdminDashboardPage() {
 
   return (
     <div className="app-bg">
+        {notification && (
+          <Toast
+            type={notification.type}
+            message={notification.message}
+            onClose={() => setNotification(null)}
+          />
+        )}
         <AppHeader
           title="Dashboard de nómina"
           subtitle="Administra tarifas, empleados y revisa el consolidado semanal."
@@ -495,7 +783,7 @@ export function AdminDashboardPage() {
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-300">
                     <th className="px-4 py-3">Nombre</th>
-                    <th className="px-4 py-3">Proceso</th>
+                    <th className="px-4 py-3">Procesos asignados</th>
                     <th className="px-4 py-3">Activo</th>
                     <th className="px-4 py-3">Acciones</th>
                   </tr>
@@ -511,15 +799,19 @@ export function AdminDashboardPage() {
                         />
                       </td>
                       <td className="px-4 py-3">
-                        <select
-                          value={empleado.proceso_habitual}
-                          onChange={(event) => setEmpleados((current) => current.map((item) => item.id === empleado.id ? { ...item, proceso_habitual: event.target.value as Empleado['proceso_habitual'] } : item))}
-                          className="w-full rounded-2xl bg-slate-950 px-3 py-2 text-slate-100"
-                        >
+                        <div className="flex flex-wrap gap-3">
                           {procesos.map((procesoItem) => (
-                            <option key={procesoItem} value={procesoItem}>{procesoItem}</option>
+                            <label key={procesoItem} className="flex items-center gap-2 text-xs text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={empleado.procesos_asignados.includes(procesoItem)}
+                                onChange={() => toggleProcesoEmpleado(empleado.id, procesoItem)}
+                                className="h-4 w-4 rounded border-slate-700 bg-slate-950"
+                              />
+                              {procesoItem}
+                            </label>
                           ))}
-                        </select>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <label className="flex items-center gap-2">
@@ -568,18 +860,22 @@ export function AdminDashboardPage() {
                     required
                   />
                 </label>
-                <label className="space-y-2">
-                  <span className="text-sm text-slate-300">Proceso habitual</span>
-                  <select
-                    value={nuevoEmpleadoProceso}
-                    onChange={(event) => setNuevoEmpleadoProceso(event.target.value as Empleado['proceso_habitual'])}
-                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
-                  >
+                <fieldset className="space-y-2">
+                  <legend className="text-sm text-slate-300">Procesos asignados</legend>
+                  <div className="flex min-h-[50px] flex-wrap items-center gap-4 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3">
                     {procesos.map((item) => (
-                      <option key={item} value={item}>{item}</option>
+                      <label key={item} className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={nuevoEmpleadoProcesos.includes(item)}
+                          onChange={() => toggleNuevoEmpleadoProceso(item)}
+                          className="h-4 w-4 rounded border-slate-700 bg-slate-950"
+                        />
+                        {item}
+                      </label>
                     ))}
-                  </select>
-                </label>
+                  </div>
+                </fieldset>
                 <div className="sm:col-span-2">
                   <button
                     type="submit"
@@ -787,6 +1083,60 @@ export function AdminDashboardPage() {
                   );
                 })}
               </tbody>
+              <tfoot className="bg-slate-800/80">
+                <tr className="border-t-2 border-slate-600 border-b border-slate-700">
+                  <th className="px-4 py-3 text-slate-300">Resumen diario</th>
+                  {diasSemana.map((dia) => (
+                    <th key={`resumen-${dia}`} className="px-4 py-3 text-slate-400">{dia}</th>
+                  ))}
+                  <th className="px-4 py-3 text-slate-400">Total kg</th>
+                  <th className="px-4 py-3 text-slate-400">Pago adicional</th>
+                  <th className="px-4 py-3 text-slate-400">Total a pagar</th>
+                </tr>
+                {resumenProcesoMaterialSemana.map((item) => (
+                  <tr
+                    key={`${item.proceso}-${item.material}`}
+                    className="border-b border-slate-700/70"
+                  >
+                    <td className="px-4 py-2 text-xs font-medium text-slate-200">
+                      {item.proceso} · {materialDisplayNames[item.material]}
+                    </td>
+                    {item.kilosPorDia.map((kilos, index) => (
+                      <td
+                        key={`${item.proceso}-${item.material}-${weekDates[index]}`}
+                        className={`px-4 py-2 text-xs ${kilos ? 'font-semibold text-slate-100' : 'text-slate-500'}`}
+                      >
+                        {kilos.toFixed(0)} kg
+                      </td>
+                    ))}
+                    <td className="px-4 py-2 text-xs font-semibold text-sky-300">
+                      {item.totalKilos.toFixed(0)} kg
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-500">—</td>
+                    <td className="px-4 py-2 text-xs font-semibold text-emerald-300">
+                      {formatCurrency(item.totalPagar)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-slate-700/50">
+                  <td className="px-4 py-3 text-xs font-bold uppercase tracking-wide text-white">
+                    Total general
+                  </td>
+                  {weekDates.map((fecha) => {
+                    const totalDia = registros
+                      .filter((registro) => registro.fecha === fecha)
+                      .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0);
+                    return (
+                      <td key={`total-${fecha}`} className="px-4 py-3 text-xs font-bold text-white">
+                        {totalDia.toFixed(0)} kg
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-3 font-bold text-sky-300">{totalKilosSemana.toFixed(0)} kg</td>
+                  <td className="px-4 py-3 font-bold text-slate-100">{formatCurrency(totalPagosAdicionalesSemana)}</td>
+                  <td className="px-4 py-3 font-bold text-emerald-300">{formatCurrency(totalAPagarSemana)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           </div>
@@ -856,16 +1206,58 @@ export function AdminDashboardPage() {
                       <th className="px-4 py-3">Kilos</th>
                       <th className="px-4 py-3">Cantidad</th>
                       <th className="px-4 py-3">Creado por</th>
+                      {isAdmin && <th className="px-4 py-3">Acciones</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {registrosPorEmpleadoYDia.map((registro) => (
                       <tr key={registro.id} className="border-b border-slate-800 hover:bg-slate-950/60">
-                        <td className="px-4 py-3">{registro.proceso}</td>
+                        <td className="px-4 py-3">
+                          {isAdmin ? (
+                            <select
+                              value={registroProcesoEditValues[registro.id] ?? registro.proceso}
+                              onChange={(event) => setRegistroProcesoEditValues((current) => ({
+                                ...current,
+                                [registro.id]: event.target.value as Proceso
+                              }))}
+                              className="min-w-36 rounded-xl bg-slate-950 px-3 py-2"
+                            >
+                              {procesos.map((procesoItem) => (
+                                <option key={procesoItem} value={procesoItem}>{procesoItem}</option>
+                              ))}
+                            </select>
+                          ) : registro.proceso}
+                        </td>
                         <td className="px-4 py-3">{materialDisplayNames[registro.material]}</td>
-                        <td className="px-4 py-3">{registro.peso_kg?.toFixed(0) ?? 0} kg</td>
+                        <td className="px-4 py-3">
+                          {isAdmin ? (
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={registroEditValues[registro.id] ?? registro.peso_kg?.toString() ?? ''}
+                              onChange={(event) => setRegistroEditValues((current) => ({
+                                ...current,
+                                [registro.id]: event.target.value
+                              }))}
+                              className="w-28 rounded-xl bg-slate-950 px-3 py-2"
+                            />
+                          ) : `${registro.peso_kg?.toFixed(0) ?? 0} kg`}
+                        </td>
                         <td className="px-4 py-3">{registro.cantidad_bultos ?? '-'}</td>
                         <td className="px-4 py-3">{registro.creado_por || 'N/A'}</td>
+                        {isAdmin && (
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => handleActualizarRegistroDiario(registro.id)}
+                              disabled={loadingAction}
+                              className="rounded-xl bg-sky-500 px-3 py-2 text-white hover:bg-sky-400 disabled:opacity-60"
+                            >
+                              Guardar cambios
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -984,6 +1376,7 @@ export function AdminDashboardPage() {
                           />
                         </td>
                         <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => handleActualizarRegistroDiario(registro.id)}
@@ -992,6 +1385,15 @@ export function AdminDashboardPage() {
                           >
                             Guardar
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEliminarRegistroDiario(registro.id)}
+                            disabled={loadingAction}
+                            className="rounded-2xl bg-rose-500 px-3 py-2 text-white transition hover:bg-rose-400 disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

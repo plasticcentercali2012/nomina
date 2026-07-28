@@ -9,7 +9,8 @@ export interface UsuarioSistema {
 export interface Empleado {
   id: string;
   nombre: string;
-  proceso_habitual: 'Picador' | 'Lavador' | 'Aglutinador';
+  proceso_habitual: Proceso;
+  procesos_asignados: Proceso[];
   activo: boolean;
 }
 

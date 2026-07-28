@@ -17,6 +17,18 @@ const materialDisplayNames: Record<Material, string> = {
 };
 const procesos: Proceso[] = ['Picador', 'Lavador', 'Aglutinador'];
 
+type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
+  empleado_procesos?: Array<{ proceso: Proceso }>;
+};
+
+function normalizeEmpleado(row: EmpleadoRow): Empleado {
+  const asignados = row.empleado_procesos?.map((item) => item.proceso) ?? [];
+  return {
+    ...row,
+    procesos_asignados: asignados.length ? asignados : [row.proceso_habitual]
+  };
+}
+
 export function CargaDiariaPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
@@ -34,16 +46,16 @@ export function CargaDiariaPage() {
   useEffect(() => {
     supabase
       .from('empleados')
-      .select('*')
+      .select('*, empleado_procesos(proceso)')
       .eq('activo', true)
       .order('nombre', { ascending: true })
       .then(({ data }) => {
         if (data) {
-          const empleadosData = data as Empleado[];
+          const empleadosData = (data as EmpleadoRow[]).map(normalizeEmpleado);
           setEmpleados(empleadosData);
           const firstId = empleadosData[0]?.id ?? '';
           setEmpleadoId(firstId);
-          setProceso(empleadosData[0]?.proceso_habitual ?? 'Picador');
+          setProceso(empleadosData[0]?.procesos_asignados[0] ?? 'Picador');
         }
       });
   }, []);
@@ -52,7 +64,7 @@ export function CargaDiariaPage() {
     if (!empleadoId || !fecha) return;
     const empleado = empleados.find((item) => item.id === empleadoId);
     if (empleado) {
-      setProceso(empleado.proceso_habitual);
+      setProceso(empleado.procesos_asignados[0] ?? empleado.proceso_habitual);
     }
     supabase
       .from('registros_diarios')
@@ -67,6 +79,11 @@ export function CargaDiariaPage() {
   const totalKilos = useMemo(
     () => registros.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0),
     [registros]
+  );
+
+  const procesosDisponibles = useMemo(
+    () => empleados.find((item) => item.id === empleadoId)?.procesos_asignados ?? procesos,
+    [empleadoId, empleados]
   );
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
@@ -85,17 +102,16 @@ export function CargaDiariaPage() {
       creado_por: profile?.id ?? ''
     };
 
-    const { error } = await supabase.from('registros_diarios').insert(newEntry);
-    if (!error) {
+    const { data, error } = await supabase
+      .from('registros_diarios')
+      .insert(newEntry)
+      .select()
+      .single();
+    if (!error && data) {
       setValor('');
       setSuccessMessage('Registro exitoso');
       setTimeout(() => setSuccessMessage(''), 3000);
-      const { data } = await supabase
-        .from('registros_diarios')
-        .select('*')
-        .eq('empleado_id', empleadoId)
-        .eq('fecha', fecha);
-      setRegistros((data as RegistroDiario[]) ?? []);
+      setRegistros((current) => [...current, data as RegistroDiario]);
     } else {
       setErrorMessage('No se pudo registrar. Intenta nuevamente.');
       setTimeout(() => setErrorMessage(''), 4000);
@@ -166,8 +182,13 @@ export function CargaDiariaPage() {
 
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">Proceso</span>
-                <select value={proceso} disabled className="field">
-                  {procesos.map((item) => (
+                <select
+                  value={proceso}
+                  onChange={(event) => setProceso(event.target.value as Proceso)}
+                  disabled={procesosDisponibles.length <= 1}
+                  className="field"
+                >
+                  {procesosDisponibles.map((item) => (
                     <option key={item} value={item}>{item}</option>
                   ))}
                 </select>
