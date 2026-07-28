@@ -61,4 +61,56 @@ create policy "insert registros autenticados" on public.registros_diarios for in
 create policy "update registros autenticados" on public.registros_diarios for update using (auth.role() = 'authenticated');
 create policy "delete registros autenticados" on public.registros_diarios for delete using (auth.role() = 'authenticated');
 
+-- Tabla de pagos adicionales semanales por empleado
+create table if not exists public.pagos_adicionales (
+  id uuid primary key default gen_random_uuid(),
+  empleado_id uuid references public.empleados(id) on delete cascade,
+  semana_inicio date not null,
+  descripcion text not null,
+  valor numeric not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.pagos_adicionales enable row level security;
+create policy "lectura pagos adicionales autenticados" on public.pagos_adicionales for select using (auth.role() = 'authenticated');
+create policy "insert pagos adicionales autenticados" on public.pagos_adicionales for insert with check (auth.role() = 'authenticated');
+create policy "update pagos adicionales autenticados" on public.pagos_adicionales for update using (auth.role() = 'authenticated');
+create policy "delete pagos adicionales autenticados" on public.pagos_adicionales for delete using (auth.role() = 'authenticated');
+
+-- Tablas de nómina histórica para guardar datos semanales y mensuales
+create table if not exists public.nominas_semanales (
+  id uuid primary key default gen_random_uuid(),
+  semana_inicio date not null,
+  empleado_id uuid references public.empleados(id) on delete cascade,
+  total_kg numeric not null,
+  pago_adicional numeric not null,
+  total_pagar numeric not null,
+  created_at timestamptz not null default now(),
+  unique (semana_inicio, empleado_id)
+);
+
+alter table public.nominas_semanales enable row level security;
+create policy "lectura nominas semanales autenticados" on public.nominas_semanales for select using (auth.role() = 'authenticated');
+create policy "insert nominas semanales autenticados" on public.nominas_semanales for insert with check (auth.role() = 'authenticated');
+create policy "update nominas semanales autenticados" on public.nominas_semanales for update using (auth.role() = 'authenticated');
+create policy "delete nominas semanales autenticados" on public.nominas_semanales for delete using (auth.role() = 'authenticated');
+
+create table if not exists public.nominas_mensuales (
+  id uuid primary key default gen_random_uuid(),
+  anio integer not null,
+  mes integer not null check (mes between 1 and 12),
+  empleado_id uuid references public.empleados(id) on delete cascade,
+  total_kg numeric not null,
+  pago_adicional numeric not null,
+  total_pagar numeric not null,
+  created_at timestamptz not null default now(),
+  unique (anio, mes, empleado_id)
+);
+
+alter table public.nominas_mensuales enable row level security;
+create policy "lectura nominas mensuales autenticados" on public.nominas_mensuales for select using (auth.role() = 'authenticated');
+create policy "insert nominas mensuales autenticados" on public.nominas_mensuales for insert with check (auth.role() = 'authenticated');
+create policy "update nominas mensuales autenticados" on public.nominas_mensuales for update using (auth.role() = 'authenticated');
+create policy "delete nominas mensuales autenticados" on public.nominas_mensuales for delete using (auth.role() = 'authenticated');
+
 -- Note: para roles diferenciados admin/encargado, use custom claims en JWT o funciones adicionales.

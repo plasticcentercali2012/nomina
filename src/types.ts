@@ -23,6 +23,36 @@ export interface Tarifa {
   precio_unidad: number;
 }
 
+export interface PagoAdicional {
+  id: string;
+  empleado_id: string;
+  semana_inicio: string;
+  descripcion: string;
+  valor: number;
+  created_at: string;
+}
+
+export interface NominaSemanal {
+  id: string;
+  semana_inicio: string;
+  empleado_id: string;
+  total_kg: number;
+  pago_adicional: number;
+  total_pagar: number;
+  created_at: string;
+}
+
+export interface NominaMensual {
+  id: string;
+  anio: number;
+  mes: number;
+  empleado_id: string;
+  total_kg: number;
+  pago_adicional: number;
+  total_pagar: number;
+  created_at: string;
+}
+
 export interface RegistroDiario {
   id: string;
   empleado_id: string;

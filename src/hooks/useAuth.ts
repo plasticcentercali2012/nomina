@@ -11,8 +11,9 @@ export function useAuth() {
 
   useEffect(() => {
     async function fetchProfile(userId: string) {
-      const { data: profileData } = await supabase.from<UsuarioSistema>('usuarios_sistema').select('*').eq('id', userId).single();
-      setProfile(profileData ?? null);
+      const { data } = await supabase.from('usuarios_sistema').select('*').eq('id', userId).single();
+      const profileData = data as UsuarioSistema | null;
+      setProfile(profileData);
     }
 
     async function init() {
@@ -42,10 +43,18 @@ export function useAuth() {
     return () => subscription?.unsubscribe();
   }, []);
 
+  async function signOut() {
+    await supabase.auth.signOut();
+    setProfile(null);
+    setUser(null);
+    setSession(null);
+  }
+
   return {
     session,
     user,
     profile,
-    loading
+    loading,
+    signOut
   };
 }
