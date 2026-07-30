@@ -3,19 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { formatLocalDate } from '../lib/dateUtils';
 import { AppHeader } from '../components/AppHeader';
-import { Empleado, Material, Proceso, RegistroDiario } from '../types';
+import { CatalogoMaterial, CatalogoProceso, Empleado, Material, Proceso, RegistroDiario } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
 import { Toast } from '../components/ui/Toast';
-
-const materiales: Material[] = ['Poli', 'M', 'T'];
-const materialDisplayNames: Record<Material, string> = {
-  Poli: 'Policolor',
-  M: 'Mono',
-  T: 'Termo',
-};
-const procesos: Proceso[] = ['Picador', 'Lavador', 'Aglutinador'];
 
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
   empleado_procesos?: Array<{ proceso: Proceso }>;
@@ -33,6 +25,8 @@ export function CargaDiariaPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [catalogoProcesos, setCatalogoProcesos] = useState<CatalogoProceso[]>([]);
+  const [catalogoMateriales, setCatalogoMateriales] = useState<CatalogoMaterial[]>([]);
   const [fecha] = useState(formatLocalDate(new Date()));
   const [empleadoId, setEmpleadoId] = useState('');
   const [proceso, setProceso] = useState<Proceso>('Picador');
@@ -44,6 +38,8 @@ export function CargaDiariaPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    supabase.from('procesos').select('nombre').order('nombre').then(({ data }) => data && setCatalogoProcesos(data as CatalogoProceso[]));
+    supabase.from('materiales').select('codigo,nombre').order('nombre').then(({ data }) => setCatalogoMateriales((data as CatalogoMaterial[]) ?? []));
     supabase
       .from('empleados')
       .select('*, empleado_procesos(proceso)')
@@ -81,10 +77,23 @@ export function CargaDiariaPage() {
     [registros]
   );
 
+  const procesos = useMemo(() => catalogoProcesos.map((item) => item.nombre), [catalogoProcesos]);
+  const materiales = useMemo(() => catalogoMateriales.map((item) => item.codigo), [catalogoMateriales]);
+  const materialDisplayNames = useMemo(
+    () => Object.fromEntries(catalogoMateriales.map((item) => [item.codigo, item.nombre])) as Record<string, string>,
+    [catalogoMateriales]
+  );
+
   const procesosDisponibles = useMemo(
     () => empleados.find((item) => item.id === empleadoId)?.procesos_asignados ?? procesos,
-    [empleadoId, empleados]
+    [empleadoId, empleados, procesos]
   );
+
+  useEffect(() => {
+    if (materiales.length && !materiales.includes(material)) {
+      setMaterial(materiales[0]);
+    }
+  }, [material, materiales]);
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

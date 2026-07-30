@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { AppHeader } from '../components/AppHeader';
-import { Empleado, NominaSemanal, PagoAdicional, Proceso, RegistroDiario, Tarifa, UsuarioSistema } from '../types';
+import { CatalogoMaterial, CatalogoProceso, Empleado, NominaSemanal, PagoAdicional, Proceso, RegistroDiario, Tarifa, UsuarioSistema } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
@@ -10,14 +10,6 @@ import { Toast } from '../components/ui/Toast';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
-const procesos: RegistroDiario['proceso'][] = ['Picador', 'Lavador', 'Aglutinador'];
-const materiales = ['Poli', 'M', 'T'] as const;
-const materialDisplayNames: Record<typeof materiales[number], string> = {
-  Poli: 'Policolor',
-  M: 'Mono',
-  T: 'Termo',
-};
-
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
   empleado_procesos?: Array<{ proceso: Proceso }>;
 };
@@ -47,12 +39,16 @@ export function AdminDashboardPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [catalogoProcesos, setCatalogoProcesos] = useState<CatalogoProceso[]>([]);
+  const [catalogoMateriales, setCatalogoMateriales] = useState<CatalogoMaterial[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioSistema[]>([]);
   const [registros, setRegistros] = useState<RegistroDiario[]>([]);
   const [tarifas, setTarifas] = useState<Tarifa[]>([]);
   const [pagosAdicionales, setPagosAdicionales] = useState<PagoAdicional[]>([]);
   const [nominasSemanales, setNominasSemanales] = useState<NominaSemanal[]>([]);
   const [semanaInicio, setSemanaInicio] = useState('');
+  const [cargandoSemana, setCargandoSemana] = useState(false);
+  const solicitudSemanaActual = useRef(0);
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
   const [selectedWeekDate, setSelectedWeekDate] = useState('');
   const [adminRegistroEmpleadoId, setAdminRegistroEmpleadoId] = useState('');
@@ -60,6 +56,8 @@ export function AdminDashboardPage() {
   const [adminRegistroProceso, setAdminRegistroProceso] = useState<RegistroDiario['proceso']>('Picador');
   const [adminRegistroMaterial, setAdminRegistroMaterial] = useState<RegistroDiario['material']>('Poli');
   const [adminRegistroKilos, setAdminRegistroKilos] = useState('');
+  const [registrosIngresoLibre, setRegistrosIngresoLibre] = useState<RegistroDiario[]>([]);
+  const [cargandoIngresoLibre, setCargandoIngresoLibre] = useState(false);
   const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
   const [registroProcesoEditValues, setRegistroProcesoEditValues] = useState<Record<string, Proceso>>({});
   const [nuevoEmpleadoNombre, setNuevoEmpleadoNombre] = useState('');
@@ -77,7 +75,18 @@ export function AdminDashboardPage() {
   const [registrosAnalitica, setRegistrosAnalitica] = useState<RegistroDiario[]>([]);
   const [cargandoAnalitica, setCargandoAnalitica] = useState(false);
   const [rangoAnaliticaCargado, setRangoAnaliticaCargado] = useState('');
+  const [filtroDetalleFecha, setFiltroDetalleFecha] = useState('');
+  const [filtroDetalleEmpleado, setFiltroDetalleEmpleado] = useState('');
+  const [filtroDetalleProceso, setFiltroDetalleProceso] = useState('');
+  const [filtroDetalleMaterial, setFiltroDetalleMaterial] = useState('');
+  const [filtroTarifaProceso, setFiltroTarifaProceso] = useState('');
+  const [filtroTarifaMaterial, setFiltroTarifaMaterial] = useState('');
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [nuevoProcesoNombre, setNuevoProcesoNombre] = useState('');
+  const [procesoEditValues, setProcesoEditValues] = useState<Record<string, string>>({});
+  const [nuevoMaterialCodigo, setNuevoMaterialCodigo] = useState('');
+  const [nuevoMaterialNombre, setNuevoMaterialNombre] = useState('');
+  const [materialEditValues, setMaterialEditValues] = useState<Record<string, string>>({});
 
   const weekDates = useMemo(() => {
     if (!semanaInicio) return [];
@@ -88,6 +97,13 @@ export function AdminDashboardPage() {
       return formatLocalDate(item);
     });
   }, [semanaInicio]);
+
+  const procesos = useMemo(() => catalogoProcesos.map((item) => item.nombre), [catalogoProcesos]);
+  const materiales = useMemo(() => catalogoMateriales.map((item) => item.codigo), [catalogoMateriales]);
+  const materialDisplayNames = useMemo(
+    () => Object.fromEntries(catalogoMateriales.map((item) => [item.codigo, item.nombre])) as Record<string, string>,
+    [catalogoMateriales]
+  );
 
   const isAdmin = profile?.rol === 'admin';
   const isGerencial = profile?.rol === 'gerencial';
@@ -120,45 +136,90 @@ export function AdminDashboardPage() {
     setSemanaInicio(formatLocalDate(monday));
   }, []);
 
+  function handleSemanaChange(value: string) {
+    if (!value) return;
+    const selectedDate = parseLocalDate(value);
+    const diff = selectedDate.getDay() === 0 ? -6 : 1 - selectedDate.getDay();
+    selectedDate.setDate(selectedDate.getDate() + diff);
+    setSemanaInicio(formatLocalDate(selectedDate));
+  }
+
   useEffect(() => {
     supabase
       .from('empleados')
       .select('*, empleado_procesos(proceso)')
       .order('nombre', { ascending: true })
       .then(({ data }) => data && setEmpleados((data as EmpleadoRow[]).map(normalizeEmpleado)));
+    supabase.from('procesos').select('nombre').order('nombre').then(({ data }) => {
+      if (data) {
+        const items = data as CatalogoProceso[];
+        setCatalogoProcesos(items);
+        setProcesoEditValues(Object.fromEntries(items.map((item) => [item.nombre, item.nombre])));
+      }
+    });
+    supabase.from('materiales').select('codigo,nombre').order('nombre').then(({ data }) => {
+      if (data) {
+        const items = data as CatalogoMaterial[];
+        setCatalogoMateriales(items);
+        setMaterialEditValues(Object.fromEntries(items.map((item) => [item.codigo, item.nombre])));
+      }
+    });
     supabase.from('tarifas').select('*').order('proceso', { ascending: true }).order('material', { ascending: true }).then(({ data }) => data && setTarifas(data as Tarifa[]));
     supabase.from('usuarios_sistema').select('*').order('email', { ascending: true }).then(({ data }) => data && setUsuarios(data as UsuarioSistema[]));
   }, []);
 
   useEffect(() => {
-    if (!weekDates.length) return;
+    if (!semanaInicio) return;
 
-    supabase
-      .from('registros_diarios')
-      .select('*')
-      .gte('fecha', weekDates[0])
-      .lte('fecha', weekDates[weekDates.length - 1])
-      .then(({ data }) => {
-        if (data) {
-          const registrosData = data as RegistroDiario[];
-          setRegistros(registrosData);
-          setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
-          setRegistroProcesoEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.proceso])));
-        }
-      });
+    const numeroSolicitud = ++solicitudSemanaActual.current;
+    const inicio = parseLocalDate(semanaInicio);
+    const fin = new Date(inicio);
+    fin.setDate(inicio.getDate() + diasSemana.length - 1);
+    const semanaFin = formatLocalDate(fin);
 
-    supabase
-      .from('pagos_adicionales')
-      .select('*')
-      .eq('semana_inicio', weekDates[0])
-      .then(({ data }) => data && setPagosAdicionales(data as PagoAdicional[]));
+    async function cargarSemana() {
+      setCargandoSemana(true);
+      const [resultadoRegistros, resultadoPagos, resultadoNominas] = await Promise.all([
+        supabase
+          .from('registros_diarios')
+          .select('*')
+          .gte('fecha', semanaInicio)
+          .lte('fecha', semanaFin),
+        supabase
+          .from('pagos_adicionales')
+          .select('*')
+          .eq('semana_inicio', semanaInicio),
+        supabase
+          .from('nominas_semanales')
+          .select('*')
+          .eq('semana_inicio', semanaInicio)
+      ]);
 
-    supabase
-      .from('nominas_semanales')
-      .select('*')
-      .eq('semana_inicio', weekDates[0])
-      .then(({ data }) => data && setNominasSemanales(data as NominaSemanal[]));
-  }, [weekDates]);
+      if (numeroSolicitud !== solicitudSemanaActual.current) return;
+
+      const error = resultadoRegistros.error ?? resultadoPagos.error ?? resultadoNominas.error;
+      if (error) {
+        setRegistros([]);
+        setPagosAdicionales([]);
+        setNominasSemanales([]);
+        setRegistroEditValues({});
+        setRegistroProcesoEditValues({});
+        notify('error', `No se pudo cargar la semana ${semanaInicio}: ${error.message}`);
+        setCargandoSemana(false);
+        return;
+      }
+
+      const registrosData = (resultadoRegistros.data ?? []) as RegistroDiario[];
+      setRegistros(registrosData);
+      setPagosAdicionales((resultadoPagos.data ?? []) as PagoAdicional[]);
+      setNominasSemanales((resultadoNominas.data ?? []) as NominaSemanal[]);
+      setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
+      setRegistroProcesoEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.proceso])));
+      setCargandoSemana(false);
+    }
+
+    void cargarSemana();
+  }, [semanaInicio]);
 
   const rangoAnalitica = useMemo(() => {
     const base = new Date(`${fechaAnalitica}T12:00:00`);
@@ -223,12 +284,56 @@ export function AdminDashboardPage() {
     }
   }, [adminRegistroEmpleadoId, empleados]);
 
+  useEffect(() => {
+    if (!isAdmin || !adminRegistroDate) return;
+
+    setCargandoIngresoLibre(true);
+    supabase
+      .from('registros_diarios')
+      .select('*')
+      .eq('fecha', adminRegistroDate)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!error) {
+          const items = (data as RegistroDiario[]) ?? [];
+          setRegistrosIngresoLibre(items);
+          setRegistroEditValues((current) => ({
+            ...current,
+            ...Object.fromEntries(items.map((item) => [item.id, item.peso_kg?.toString() ?? '']))
+          }));
+          setRegistroProcesoEditValues((current) => ({
+            ...current,
+            ...Object.fromEntries(items.map((item) => [item.id, item.proceso]))
+          }));
+        } else {
+          notify('error', `No se pudieron cargar los registros de la fecha: ${error.message}`);
+        }
+        setCargandoIngresoLibre(false);
+      });
+  }, [adminRegistroDate, isAdmin]);
+
   const registrosPorEmpleadoYDia = useMemo(() => {
     if (!selectedEmpleadoId || !selectedWeekDate) return [];
     return registros.filter(
       (item) => item.empleado_id === selectedEmpleadoId && item.fecha === selectedWeekDate
     );
   }, [registros, selectedEmpleadoId, selectedWeekDate]);
+
+  const registrosIngresoLibreFiltrados = useMemo(
+    () => registrosIngresoLibre.filter((registro) =>
+      registro.fecha === adminRegistroDate
+      && registro.empleado_id === adminRegistroEmpleadoId
+      && registro.proceso === adminRegistroProceso
+      && registro.material === adminRegistroMaterial
+    ),
+    [
+      adminRegistroDate,
+      adminRegistroEmpleadoId,
+      adminRegistroMaterial,
+      adminRegistroProceso,
+      registrosIngresoLibre
+    ]
+  );
 
   const selectedEmpleadoName = useMemo(
     () => empleados.find((item) => item.id === selectedEmpleadoId)?.nombre ?? '',
@@ -258,6 +363,10 @@ export function AdminDashboardPage() {
       .single();
     if (!error && data) {
       const registroCreado = data as RegistroDiario;
+      setRegistrosIngresoLibre((current) => [
+        registroCreado,
+        ...current.filter((item) => item.id !== registroCreado.id)
+      ]);
       if (weekDates.includes(registroCreado.fecha)) {
         setRegistros((current) => [...current, registroCreado]);
         setRegistroEditValues((current) => ({
@@ -293,9 +402,42 @@ export function AdminDashboardPage() {
     };
   }, [registrosAnalitica]);
 
-  const resumenProcesoMaterialSemana = useMemo(
+  const registrosAnaliticaFiltrados = useMemo(
+    () => registrosAnalitica.filter((registro) =>
+      (!filtroDetalleFecha || registro.fecha === filtroDetalleFecha)
+      && (!filtroDetalleEmpleado || registro.empleado_id === filtroDetalleEmpleado)
+      && (!filtroDetalleProceso || registro.proceso === filtroDetalleProceso)
+      && (!filtroDetalleMaterial || registro.material === filtroDetalleMaterial)
+    ),
+    [
+      filtroDetalleEmpleado,
+      filtroDetalleFecha,
+      filtroDetalleMaterial,
+      filtroDetalleProceso,
+      registrosAnalitica
+    ]
+  );
+
+  const tarifasFiltradas = useMemo(
+    () => tarifas.filter((tarifa) =>
+      (!filtroTarifaProceso || tarifa.proceso === filtroTarifaProceso)
+      && (!filtroTarifaMaterial || tarifa.material === filtroTarifaMaterial)
+    ),
+    [filtroTarifaMaterial, filtroTarifaProceso, tarifas]
+  );
+
+  function limpiarFiltrosDetalle() {
+    setFiltroDetalleFecha('');
+    setFiltroDetalleEmpleado('');
+    setFiltroDetalleProceso('');
+    setFiltroDetalleMaterial('');
+  }
+
+  const resumenPorProcesoSemana = useMemo(
     () => procesos.flatMap((proceso) =>
-      materiales.map((material) => {
+      [{
+        proceso,
+        materiales: materiales.map((material) => {
         const kilosPorDia = weekDates.map((fecha) =>
           registros
             .filter(
@@ -309,15 +451,37 @@ export function AdminDashboardPage() {
         const totalKilos = kilosPorDia.reduce((total, kilos) => total + kilos, 0);
 
         return {
-          proceso,
           material,
           kilosPorDia,
           totalKilos,
           totalPagar: totalKilos * getTarifaPrecio(proceso, material)
         };
-      })
+        }),
+        totalesPorDia: weekDates.map((fecha) =>
+          registros
+            .filter((registro) => registro.fecha === fecha && registro.proceso === proceso)
+            .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0)
+        ),
+        totalKilos: registros
+          .filter((registro) => weekDates.includes(registro.fecha) && registro.proceso === proceso)
+          .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0),
+        totalPagar: registros
+          .filter((registro) => weekDates.includes(registro.fecha) && registro.proceso === proceso)
+          .reduce(
+            (total, registro) =>
+              total + ((registro.peso_kg ?? 0) * getTarifaPrecio(registro.proceso, registro.material)),
+            0
+          )
+      }]
     ),
-    [registros, tarifas, weekDates]
+    [materiales, procesos, registros, tarifas, weekDates]
+  );
+
+  const resumenProcesoMaterialSemana = useMemo(
+    () => resumenPorProcesoSemana.flatMap((resumen) =>
+      resumen.materiales.map((item) => ({ ...item, proceso: resumen.proceso }))
+    ),
+    [resumenPorProcesoSemana]
   );
 
   const totalKilosSemana = useMemo(
@@ -523,6 +687,9 @@ export function AdminDashboardPage() {
       setRegistrosAnalitica((current) =>
         current.map((item) => (item.id === id ? registroActualizado : item))
       );
+      setRegistrosIngresoLibre((current) =>
+        current.map((item) => (item.id === id ? registroActualizado : item))
+      );
       setRegistroEditValues((current) => ({ ...current, [id]: nuevoPeso.toString() }));
       setRegistroProcesoEditValues((current) => ({ ...current, [id]: nuevoProceso }));
       notify('success', 'El registro fue actualizado en todas las vistas.');
@@ -540,6 +707,7 @@ export function AdminDashboardPage() {
     if (!error) {
       setRegistros((current) => current.filter((item) => item.id !== id));
       setRegistrosAnalitica((current) => current.filter((item) => item.id !== id));
+      setRegistrosIngresoLibre((current) => current.filter((item) => item.id !== id));
       setRegistroEditValues((current) => {
         const siguiente = { ...current };
         delete siguiente[id];
@@ -630,11 +798,130 @@ export function AdminDashboardPage() {
       setEmpleados((current) => current.filter((item) => item.id !== id));
       setRegistros((current) => current.filter((item) => item.empleado_id !== id));
       setRegistrosAnalitica((current) => current.filter((item) => item.empleado_id !== id));
+      setRegistrosIngresoLibre((current) => current.filter((item) => item.empleado_id !== id));
       setPagosAdicionales((current) => current.filter((item) => item.empleado_id !== id));
       setNominasSemanales((current) => current.filter((item) => item.empleado_id !== id));
       notify('success', 'El empleado y sus registros asociados fueron eliminados.');
     } else {
       notify('error', `No se pudo eliminar el empleado: ${error.message}`);
+    }
+  }
+
+  async function handleCrearProceso(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nombre = nuevoProcesoNombre.trim();
+    if (!nombre) return;
+
+    setLoadingAction(true);
+    const { data, error } = await supabase.from('procesos').insert({ nombre }).select('nombre').single();
+    if (!error && data) {
+      setCatalogoProcesos((current) => [...current, data as CatalogoProceso].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setProcesoEditValues((current) => ({ ...current, [nombre]: nombre }));
+      setNuevoProcesoNombre('');
+      notify('success', 'El proceso fue creado y ya está disponible en los selectores.');
+    } else {
+      notify('error', `No se pudo crear el proceso: ${error?.message ?? 'error desconocido'}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleActualizarProceso(nombreOriginal: string) {
+    const nombre = procesoEditValues[nombreOriginal]?.trim();
+    if (!nombre) return;
+
+    setLoadingAction(true);
+    const { error } = await supabase.from('procesos').update({ nombre }).eq('nombre', nombreOriginal);
+    if (!error) {
+      setCatalogoProcesos((current) => current
+        .map((item) => item.nombre === nombreOriginal ? { nombre } : item)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setEmpleados((current) => current.map((empleado) => ({
+        ...empleado,
+        proceso_habitual: empleado.proceso_habitual === nombreOriginal ? nombre : empleado.proceso_habitual,
+        procesos_asignados: empleado.procesos_asignados.map((item) => item === nombreOriginal ? nombre : item)
+      })));
+      setTarifas((current) => current.map((item) => item.proceso === nombreOriginal ? { ...item, proceso: nombre } : item));
+      setRegistros((current) => current.map((item) => item.proceso === nombreOriginal ? { ...item, proceso: nombre } : item));
+      setRegistrosAnalitica((current) => current.map((item) => item.proceso === nombreOriginal ? { ...item, proceso: nombre } : item));
+      setRegistrosIngresoLibre((current) => current.map((item) => item.proceso === nombreOriginal ? { ...item, proceso: nombre } : item));
+      setRegistroProcesoEditValues((current) => Object.fromEntries(
+        Object.entries(current).map(([id, proceso]) => [id, proceso === nombreOriginal ? nombre : proceso])
+      ));
+      setProcesoEditValues((current) => {
+        const siguiente = { ...current };
+        delete siguiente[nombreOriginal];
+        siguiente[nombre] = nombre;
+        return siguiente;
+      });
+      if (nuevoTarifaProceso === nombreOriginal) setNuevoTarifaProceso(nombre);
+      if (adminRegistroProceso === nombreOriginal) setAdminRegistroProceso(nombre);
+      setNuevoEmpleadoProcesos((current) => current.map((item) => item === nombreOriginal ? nombre : item));
+      notify('success', 'El proceso fue actualizado en empleados, tarifas y registros.');
+    } else {
+      notify('error', `No se pudo actualizar el proceso: ${error.message}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleEliminarProceso(nombre: string) {
+    if (!window.confirm(`¿Eliminar el proceso "${nombre}"?`)) return;
+    const { error } = await supabase.from('procesos').delete().eq('nombre', nombre);
+    if (!error) {
+      setCatalogoProcesos((current) => current.filter((item) => item.nombre !== nombre));
+      notify('success', 'El proceso fue eliminado.');
+    } else {
+      notify('error', 'No se puede eliminar un proceso que esté asignado a empleados, tarifas o registros.');
+    }
+  }
+
+  async function handleCrearMaterial(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const codigo = nuevoMaterialCodigo.trim();
+    const nombre = nuevoMaterialNombre.trim();
+    if (!codigo || !nombre) return;
+
+    setLoadingAction(true);
+    const { data, error } = await supabase.from('materiales').insert({ codigo, nombre }).select('codigo,nombre').single();
+    if (!error && data) {
+      setCatalogoMateriales((current) => [...current, data as CatalogoMaterial].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setMaterialEditValues((current) => ({ ...current, [codigo]: nombre }));
+      setNuevoMaterialCodigo('');
+      setNuevoMaterialNombre('');
+      notify('success', 'El material fue creado y ya está disponible en los selectores.');
+    } else {
+      notify('error', `No se pudo crear el material: ${error?.message ?? 'error desconocido'}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleActualizarMaterial(material: CatalogoMaterial) {
+    const nombre = materialEditValues[material.codigo]?.trim();
+    if (!nombre) return;
+    const { error } = await supabase.from('materiales').update({ nombre }).eq('codigo', material.codigo);
+    if (!error) {
+      setCatalogoMateriales((current) => current
+        .map((item) => item.codigo === material.codigo ? { ...item, nombre } : item)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setMaterialEditValues((current) => ({ ...current, [material.codigo]: nombre }));
+      notify('success', 'El nombre del material fue actualizado en todo el sistema.');
+    } else {
+      notify('error', `No se pudo actualizar el material: ${error.message}`);
+    }
+  }
+
+  async function handleEliminarMaterial(codigo: string) {
+    if (!window.confirm(`¿Eliminar el material "${materialDisplayNames[codigo] ?? codigo}"?`)) return;
+    const { error } = await supabase.from('materiales').delete().eq('codigo', codigo);
+    if (!error) {
+      setCatalogoMateriales((current) => current.filter((item) => item.codigo !== codigo));
+      setMaterialEditValues((current) => {
+        const siguiente = { ...current };
+        delete siguiente[codigo];
+        return siguiente;
+      });
+      notify('success', 'El material fue eliminado.');
+    } else {
+      notify('error', 'No se puede eliminar un material que esté usado en tarifas o registros.');
     }
   }
 
@@ -694,7 +981,7 @@ export function AdminDashboardPage() {
 
   function exportAnaliticaCsv() {
     const encabezados = ['Fecha', 'Empleado', 'Proceso', 'Material', 'Kilos'];
-    const filas = registrosAnalitica.map((registro) => [
+    const filas = registrosAnaliticaFiltrados.map((registro) => [
       registro.fecha,
       empleados.find((empleado) => empleado.id === registro.empleado_id)?.nombre ?? 'Empleado',
       registro.proceso,
@@ -886,15 +1173,107 @@ export function AdminDashboardPage() {
                 </div>
               </form>
             </div>
+
+            <div className="mt-8 grid gap-4 xl:grid-cols-2">
+              <details className="group overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/70">
+                <summary className="flex cursor-pointer list-none items-center justify-between p-5 font-semibold text-white">
+                  CRUD de procesos
+                  <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="space-y-4 border-t border-slate-800 p-5">
+                  <form onSubmit={handleCrearProceso} className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      value={nuevoProcesoNombre}
+                      onChange={(event) => setNuevoProcesoNombre(event.target.value)}
+                      placeholder="Nombre del proceso"
+                      className="field flex-1"
+                      required
+                    />
+                    <button type="submit" disabled={loadingAction} className="btn-primary">
+                      <Icon name="plus" className="h-4 w-4" /> Agregar
+                    </button>
+                  </form>
+                  <div className="space-y-2">
+                    {catalogoProcesos.map((proceso) => (
+                      <div key={proceso.nombre} className="flex flex-col gap-2 rounded-2xl border border-slate-800 p-3 sm:flex-row">
+                        <input
+                          value={procesoEditValues[proceso.nombre] ?? proceso.nombre}
+                          onChange={(event) => setProcesoEditValues((current) => ({
+                            ...current,
+                            [proceso.nombre]: event.target.value
+                          }))}
+                          className="field flex-1"
+                        />
+                        <button type="button" onClick={() => handleActualizarProceso(proceso.nombre)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
+                          Guardar
+                        </button>
+                        <button type="button" onClick={() => handleEliminarProceso(proceso.nombre)} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+
+              <details className="group overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/70">
+                <summary className="flex cursor-pointer list-none items-center justify-between p-5 font-semibold text-white">
+                  CRUD de materiales
+                  <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="space-y-4 border-t border-slate-800 p-5">
+                  <form onSubmit={handleCrearMaterial} className="grid gap-3 sm:grid-cols-[120px_1fr_auto]">
+                    <input
+                      value={nuevoMaterialCodigo}
+                      onChange={(event) => setNuevoMaterialCodigo(event.target.value)}
+                      placeholder="Código"
+                      className="field"
+                      required
+                    />
+                    <input
+                      value={nuevoMaterialNombre}
+                      onChange={(event) => setNuevoMaterialNombre(event.target.value)}
+                      placeholder="Nombre del material"
+                      className="field"
+                      required
+                    />
+                    <button type="submit" disabled={loadingAction} className="btn-primary">
+                      <Icon name="plus" className="h-4 w-4" /> Agregar
+                    </button>
+                  </form>
+                  <div className="space-y-2">
+                    {catalogoMateriales.map((material) => (
+                      <div key={material.codigo} className="grid gap-2 rounded-2xl border border-slate-800 p-3 sm:grid-cols-[90px_1fr_auto_auto]">
+                        <div className="flex items-center rounded-xl bg-slate-900 px-3 text-xs font-bold text-slate-400">{material.codigo}</div>
+                        <input
+                          value={materialEditValues[material.codigo] ?? material.nombre}
+                          onChange={(event) => setMaterialEditValues((current) => ({
+                            ...current,
+                            [material.codigo]: event.target.value
+                          }))}
+                          className="field"
+                        />
+                        <button type="button" onClick={() => handleActualizarMaterial(material)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
+                          Guardar
+                        </button>
+                        <button type="button" onClick={() => handleEliminarMaterial(material.codigo)} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            </div>
           </section>
         )}
 
         {!isGerencial && activeTab === 'tarifas' && (
-          <section className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
+          <section className="space-y-4">
+            <div className="card flex items-center justify-between gap-4 p-6 flex-wrap">
               <div>
                 <h2 className="text-2xl font-semibold">Tarifas por proceso</h2>
-                <p className="mt-2 text-slate-400">Edita el precio por kilo para cada proceso y material.</p>
+                <p className="mt-2 text-slate-400">Administra precios, procesos y materiales en bloques independientes.</p>
               </div>
               <button
                 type="button"
@@ -904,7 +1283,42 @@ export function AdminDashboardPage() {
                 Ver consolidado
               </button>
             </div>
-            <div className="responsive-table mt-6 overflow-x-auto">
+
+            <details open className="group card overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between p-5 font-semibold text-white">
+                Tabla de tarifas
+                <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="border-t border-slate-800 bg-slate-950/30 p-5">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_auto] lg:items-end">
+                  <label className="field-label">
+                    <span>Proceso</span>
+                    <select className="field-input" value={filtroTarifaProceso} onChange={(event) => setFiltroTarifaProceso(event.target.value)}>
+                      <option value="">Todos los procesos</option>
+                      {procesos.map((proceso) => <option key={proceso} value={proceso}>{proceso}</option>)}
+                    </select>
+                  </label>
+                  <label className="field-label">
+                    <span>Material</span>
+                    <select className="field-input" value={filtroTarifaMaterial} onChange={(event) => setFiltroTarifaMaterial(event.target.value)}>
+                      <option value="">Todos los materiales</option>
+                      {materiales.map((material) => <option key={material} value={material}>{materialDisplayNames[material] ?? material}</option>)}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-secondary h-12 rounded-2xl px-5"
+                    onClick={() => {
+                      setFiltroTarifaProceso('');
+                      setFiltroTarifaMaterial('');
+                    }}
+                  >
+                    Limpiar
+                  </button>
+                </div>
+                <p className="mt-4 text-xs text-slate-500">{tarifasFiltradas.length} de {tarifas.length} tarifas</p>
+              </div>
+              <div className="responsive-table overflow-x-auto border-t border-slate-800">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-300">
@@ -915,7 +1329,7 @@ export function AdminDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {tarifas.map((tarifa) => (
+                  {tarifasFiltradas.map((tarifa) => (
                     <tr key={tarifa.id} className="border-b border-slate-800 hover:bg-slate-950/60">
                       <td className="px-4 py-3">{tarifa.proceso}</td>
                       <td className="px-4 py-3">{materialDisplayNames[tarifa.material]}</td>
@@ -953,10 +1367,15 @@ export function AdminDashboardPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </details>
 
-            <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
-              <h3 className="text-xl font-semibold">Agregar nueva tarifa</h3>
+            <details className="group card overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between p-5 font-semibold text-white">
+                Agregar nueva tarifa
+                <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="border-t border-slate-800 p-6">
               <form onSubmit={handleCrearTarifa} className="mt-4 grid gap-4 sm:grid-cols-3">
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Proceso</span>
@@ -1004,7 +1423,8 @@ export function AdminDashboardPage() {
                   </button>
                 </div>
               </form>
-            </div>
+              </div>
+            </details>
           </section>
         )}
 
@@ -1022,9 +1442,10 @@ export function AdminDashboardPage() {
                 <input
                   type="date"
                   value={semanaInicio}
-                  onChange={(event) => setSemanaInicio(event.target.value)}
+                  onChange={(event) => handleSemanaChange(event.target.value)}
                   className="rounded-2xl bg-slate-950 px-4 py-3"
                 />
+                {cargandoSemana && <span className="text-xs font-medium text-sky-300">Cargando semana...</span>}
                 <button
                   type="button"
                   onClick={exportSemanalCsv}
@@ -1082,8 +1503,15 @@ export function AdminDashboardPage() {
                     </tr>
                   );
                 })}
+                <tr className="border-t-2 border-slate-600 bg-slate-800/80">
+                  <td className="px-4 py-4 text-xs font-bold uppercase tracking-wide text-white">Total general</td>
+                  {weekDates.map((fecha) => <td key={`general-${fecha}`} className="px-4 py-4" />)}
+                  <td className="px-4 py-4" />
+                  <td className="px-4 py-4" />
+                  <td className="px-4 py-4 font-bold text-emerald-300">{formatCurrency(totalAPagarSemana)}</td>
+                </tr>
               </tbody>
-              <tfoot className="bg-slate-800/80">
+              <tfoot className="hidden">
                 <tr className="border-t-2 border-slate-600 border-b border-slate-700">
                   <th className="px-4 py-3 text-slate-300">Resumen diario</th>
                   {diasSemana.map((dia) => (
@@ -1138,6 +1566,62 @@ export function AdminDashboardPage() {
                 </tr>
               </tfoot>
             </table>
+          </div>
+          <div className="space-y-3 border-t border-slate-800 bg-slate-950/30 p-4 sm:p-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Resumen diario por proceso</h3>
+              <p className="mt-1 text-xs text-slate-500">Los totales permanecen visibles cuando una subtabla está contraída.</p>
+            </div>
+            {resumenPorProcesoSemana.map((resumen) => (
+              <details key={resumen.proceso} className="group overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/80">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4">
+                  <div className="flex items-center gap-3">
+                    <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
+                    <span className="font-semibold text-white">{resumen.proceso}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                    <span className="text-slate-400">Total proceso: <strong className="text-sky-300">{resumen.totalKilos.toFixed(0)} kg</strong></span>
+                    <span className="text-slate-400">Total a pagar: <strong className="text-emerald-300">{formatCurrency(resumen.totalPagar)}</strong></span>
+                  </div>
+                </summary>
+                <div className="overflow-x-auto border-t border-slate-700">
+                  <table className="min-w-[1050px] border-collapse text-left text-xs">
+                    <thead>
+                      <tr>
+                        <th className="px-4 py-3">Material</th>
+                        {diasSemana.map((dia) => <th key={`${resumen.proceso}-${dia}`} className="px-4 py-3">{dia}</th>)}
+                        <th className="px-4 py-3">Total kg</th>
+                        <th className="px-4 py-3">Total a pagar</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resumen.materiales.map((item) => (
+                        <tr key={`${resumen.proceso}-${item.material}`} className="border-t border-slate-800">
+                          <td className="px-4 py-3 font-medium text-slate-200">{materialDisplayNames[item.material] ?? item.material}</td>
+                          {item.kilosPorDia.map((kilos, index) => (
+                            <td key={`${resumen.proceso}-${item.material}-${weekDates[index]}`} className={kilos ? 'px-4 py-3 font-semibold text-white' : 'px-4 py-3 text-slate-500'}>
+                              {kilos.toFixed(0)} kg
+                            </td>
+                          ))}
+                          <td className="px-4 py-3 font-semibold text-sky-300">{item.totalKilos.toFixed(0)} kg</td>
+                          <td className="px-4 py-3 font-semibold text-emerald-300">{formatCurrency(item.totalPagar)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-600 bg-slate-800/80">
+                        <td className="px-4 py-3 font-bold uppercase text-white">Total {resumen.proceso}</td>
+                        {resumen.totalesPorDia.map((kilos, index) => (
+                          <td key={`${resumen.proceso}-total-${weekDates[index]}`} className="px-4 py-3 font-bold text-white">{kilos.toFixed(0)} kg</td>
+                        ))}
+                        <td className="px-4 py-3 font-bold text-sky-300">{resumen.totalKilos.toFixed(0)} kg</td>
+                        <td className="px-4 py-3 font-bold text-emerald-300">{formatCurrency(resumen.totalPagar)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </details>
+            ))}
           </div>
           </div>
 
@@ -1346,6 +1830,12 @@ export function AdminDashboardPage() {
                   Registrar kilos
                 </button>
               </div>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-xs text-slate-400">
+                <span>La fecha, el empleado, el proceso y el material también filtran la tabla.</span>
+                <span className="font-semibold text-slate-200">
+                  {cargandoIngresoLibre ? 'Consultando…' : `${registrosIngresoLibreFiltrados.length} registro(s)`}
+                </span>
+              </div>
               <div className="responsive-table mt-6 overflow-x-auto">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
@@ -1359,7 +1849,7 @@ export function AdminDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {registros.map((registro) => (
+                    {registrosIngresoLibreFiltrados.map((registro) => (
                       <tr key={registro.id} className="border-b border-slate-800 hover:bg-slate-950/60">
                         <td className="px-4 py-3">{registro.fecha}</td>
                         <td className="px-4 py-3">{empleados.find((emp) => emp.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>
@@ -1397,6 +1887,13 @@ export function AdminDashboardPage() {
                         </td>
                       </tr>
                     ))}
+                    {!cargandoIngresoLibre && registrosIngresoLibreFiltrados.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                          No hay registros que coincidan con los cuatro filtros.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1519,7 +2016,7 @@ export function AdminDashboardPage() {
                   <span className="mb-2 block text-xs font-semibold text-slate-400">Fecha de referencia</span>
                   <input type="date" value={fechaAnalitica} onChange={(event) => setFechaAnalitica(event.target.value)} className="field" />
                 </label>
-                <button type="button" onClick={exportAnaliticaCsv} disabled={!registrosAnalitica.length} className="btn-secondary">
+                <button type="button" onClick={exportAnaliticaCsv} disabled={!registrosAnaliticaFiltrados.length} className="btn-secondary">
                   <Icon name="download" className="h-4 w-4" /> Exportar CSV
                 </button>
               </div>
@@ -1579,16 +2076,56 @@ export function AdminDashboardPage() {
           <div className="card overflow-hidden">
             <div className="flex flex-col justify-between gap-3 border-b border-slate-800 p-5 sm:flex-row sm:items-center">
               <div><h3 className="font-bold text-white">Detalle del periodo</h3><p className="mt-1 text-xs text-slate-500">Trazabilidad por fecha, empleado, proceso y material.</p></div>
-              <span className="badge-success">{registrosAnalitica.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0).toLocaleString('es-CO')} kg</span>
+              <span className="badge-success">{registrosAnaliticaFiltrados.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0).toLocaleString('es-CO')} kg</span>
             </div>
-            {registrosAnalitica.length === 0 ? (
+            <div className="border-b border-slate-800 bg-slate-950/30 p-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1.4fr_1fr_1fr_auto] xl:items-end">
+                <label className="field-label">
+                  <span>Fecha</span>
+                  <input
+                    type="date"
+                    className="field-input"
+                    value={filtroDetalleFecha}
+                    min={rangoAnalitica.inicio}
+                    max={rangoAnalitica.fin}
+                    onChange={(event) => setFiltroDetalleFecha(event.target.value)}
+                  />
+                </label>
+                <label className="field-label">
+                  <span>Empleado</span>
+                  <select className="field-input" value={filtroDetalleEmpleado} onChange={(event) => setFiltroDetalleEmpleado(event.target.value)}>
+                    <option value="">Todos los empleados</option>
+                    {empleados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}
+                  </select>
+                </label>
+                <label className="field-label">
+                  <span>Proceso</span>
+                  <select className="field-input" value={filtroDetalleProceso} onChange={(event) => setFiltroDetalleProceso(event.target.value)}>
+                    <option value="">Todos los procesos</option>
+                    {procesos.map((proceso) => <option key={proceso} value={proceso}>{proceso}</option>)}
+                  </select>
+                </label>
+                <label className="field-label">
+                  <span>Material</span>
+                  <select className="field-input" value={filtroDetalleMaterial} onChange={(event) => setFiltroDetalleMaterial(event.target.value)}>
+                    <option value="">Todos los materiales</option>
+                    {materiales.map((material) => <option key={material} value={material}>{materialDisplayNames[material]}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="btn-secondary h-12 rounded-2xl px-5" onClick={limpiarFiltrosDetalle}>Limpiar</button>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                {registrosAnaliticaFiltrados.length} de {registrosAnalitica.length} registros · Usa los filtros individualmente o combínalos.
+              </p>
+            </div>
+            {registrosAnaliticaFiltrados.length === 0 ? (
               <div className="grid min-h-40 place-items-center p-6 text-center"><div><Icon name="file" className="mx-auto h-8 w-8 text-slate-700" /><p className="mt-3 text-sm text-slate-500">No hay producción registrada en este periodo.</p></div></div>
             ) : (
               <div className="responsive-table overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead><tr><th className="px-5 py-3">Fecha</th><th className="px-5 py-3">Empleado</th><th className="px-5 py-3">Proceso</th><th className="px-5 py-3">Material</th><th className="px-5 py-3 text-right">Volumen</th></tr></thead>
                   <tbody>
-                    {registrosAnalitica.map((registro) => (
+                    {registrosAnaliticaFiltrados.map((registro) => (
                       <tr key={registro.id} className="border-t border-slate-800/70">
                         <td data-label="Fecha" className="px-5 py-3">{registro.fecha}</td>
                         <td data-label="Empleado" className="px-5 py-3 font-medium text-white">{empleados.find((empleado) => empleado.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>

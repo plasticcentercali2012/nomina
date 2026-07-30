@@ -14,8 +14,17 @@ export interface Empleado {
   activo: boolean;
 }
 
-export type Material = 'Poli' | 'M' | 'T';
-export type Proceso = 'Picador' | 'Lavador' | 'Aglutinador';
+export type Material = string;
+export type Proceso = string;
+
+export interface CatalogoProceso {
+  nombre: string;
+}
+
+export interface CatalogoMaterial {
+  codigo: string;
+  nombre: string;
+}
 
 export interface Tarifa {
   id: string;
