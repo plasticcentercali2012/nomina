@@ -35,6 +35,28 @@ function formatCurrencyInput(value: string) {
   return digits ? new Intl.NumberFormat('es-CO').format(Number(digits)) : '';
 }
 
+function escapeReceiptText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function usaResumenTermicoPorDia(proceso: string) {
+  const nombreNormalizado = proceso
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return nombreNormalizado === 'lavador'
+    || nombreNormalizado === 'lavado'
+    || nombreNormalizado === 'aglutinador'
+    || nombreNormalizado === 'aglutinado'
+    || nombreNormalizado === 'servicio';
+}
+
 export function AdminDashboardPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
@@ -511,6 +533,101 @@ export function AdminDashboardPage() {
     return registros
       .filter((item) => item.empleado_id === empleadoId && item.fecha === fecha)
       .map((item) => `${item.proceso} ${materialDisplayNames[item.material]} ${item.peso_kg?.toFixed(0) ?? 0} kg`);
+  }
+
+  function imprimirComprobanteEmpleado(empleado: Empleado) {
+    const registrosEmpleado = registros
+      .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const totalKg = registrosEmpleado.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
+    const subtotalProduccion = registrosEmpleado.reduce(
+      (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)),
+      0
+    );
+    const pagoAdicional = getPagoAdicional(empleado.id);
+    const totalPagar = subtotalProduccion + pagoAdicional;
+    const comprobante = window.open('', '_blank', 'width=420,height=720');
+
+    if (!comprobante) {
+      notify('error', 'El navegador bloqueó la ventana de impresión. Habilita las ventanas emergentes para este sitio.');
+      return;
+    }
+
+    const detalleDias = weekDates.map((fecha, index) => {
+      const items = registrosEmpleado.filter((item) => item.fecha === fecha);
+      const totalDiaKg = items.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
+      const totalDiaPago = items.reduce(
+        (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)),
+        0
+      );
+      const mostrarSoloResumen = items.some((item) => usaResumenTermicoPorDia(item.proceso));
+      const detalle = items.length
+        ? mostrarSoloResumen
+          ? ''
+          : items.map((item) => {
+          const kilos = item.peso_kg ?? 0;
+          const precio = getTarifaPrecio(item.proceso, item.material);
+          return `<div class="item">
+            <div>${escapeReceiptText(item.proceso)} · ${escapeReceiptText(materialDisplayNames[item.material] ?? item.material)}</div>
+            <div class="line"><span>${kilos.toLocaleString('es-CO')} kg × ${formatCurrency(precio)}</span><strong>${formatCurrency(kilos * precio)}</strong></div>
+          </div>`;
+          }).join('')
+        : '<div class="empty">Sin registros</div>';
+
+      return `<section class="day">
+        <div class="day-title"><strong>${escapeReceiptText(diasSemana[index])}</strong><span>${escapeReceiptText(fecha)}</span></div>
+        ${detalle}
+        <div class="day-total"><span>Total día: ${totalDiaKg.toLocaleString('es-CO')} kg</span><strong>${formatCurrency(totalDiaPago)}</strong></div>
+      </section>`;
+    }).join('');
+
+    comprobante.document.write(`<!doctype html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8">
+        <title>Comprobante ${escapeReceiptText(empleado.nombre)} - ${escapeReceiptText(semanaInicio)}</title>
+        <style>
+          @page { size: 58mm auto; margin: 2mm; }
+          * { box-sizing: border-box; }
+          body { width: 54mm; margin: 0 auto; color: #000; background: #fff; font: 10px/1.35 ui-monospace, "Courier New", monospace; }
+          h1 { margin: 0; font-size: 14px; text-align: center; }
+          .center { text-align: center; }
+          .meta { margin: 3mm 0; padding: 2mm 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
+          .meta strong { display: block; font-size: 11px; }
+          .day { padding: 2mm 0; border-bottom: 1px dashed #000; break-inside: avoid; }
+          .day-title, .line, .day-total, .total-line { display: flex; justify-content: space-between; gap: 2mm; }
+          .day-title { margin-bottom: 1mm; }
+          .item { margin: 1.5mm 0; }
+          .line { font-size: 9px; }
+          .empty { color: #555; font-style: italic; }
+          .day-total { margin-top: 1.5mm; font-weight: 700; }
+          .totals { margin-top: 3mm; }
+          .total-line { margin: 1mm 0; }
+          .grand-total { margin-top: 2mm; padding: 2mm 0; border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 13px; font-weight: 700; }
+          .footer { margin: 4mm 0 2mm; text-align: center; font-size: 9px; }
+          @media screen { body { padding: 3mm 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>COMPROBANTE DE PAGO</h1>
+        <div class="meta">
+          <strong>${escapeReceiptText(empleado.nombre)}</strong>
+          <div>Semana: ${escapeReceiptText(weekDates[0] ?? '')} al ${escapeReceiptText(weekDates[weekDates.length - 1] ?? '')}</div>
+          <div>Emitido: ${escapeReceiptText(new Date().toLocaleString('es-CO'))}</div>
+        </div>
+        ${detalleDias}
+        <div class="totals">
+          <div class="total-line"><span>Total kilos</span><strong>${totalKg.toLocaleString('es-CO')} kg</strong></div>
+          <div class="total-line"><span>Producción</span><strong>${formatCurrency(subtotalProduccion)}</strong></div>
+          <div class="total-line"><span>Pago adicional</span><strong>${formatCurrency(pagoAdicional)}</strong></div>
+          <div class="total-line grand-total"><span>TOTAL A PAGAR</span><strong>${formatCurrency(totalPagar)}</strong></div>
+        </div>
+        <div class="footer">Comprobante informativo de nómina</div>
+      </body>
+      </html>`);
+    comprobante.document.close();
+    comprobante.focus();
+    window.setTimeout(() => comprobante.print(), 250);
   }
 
   async function handleActualizarTarifa(id: string, precioUnificado: number) {
@@ -1467,6 +1584,7 @@ export function AdminDashboardPage() {
                   <th className="px-4 py-3">Total kg</th>
                   <th className="px-4 py-3">Pago adicional</th>
                   <th className="px-4 py-3">Total a pagar</th>
+                  <th className="px-4 py-3 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -1500,6 +1618,17 @@ export function AdminDashboardPage() {
                           + getPagoAdicional(empleado.id)
                         )}
                       </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => imprimirComprobanteEmpleado(empleado)}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 transition hover:border-sky-400/60 hover:bg-sky-500/20 hover:text-sky-200"
+                          title={`Imprimir comprobante de ${empleado.nombre}`}
+                          aria-label={`Imprimir comprobante de ${empleado.nombre}`}
+                        >
+                          <Icon name="printer" className="h-5 w-5" />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -1509,6 +1638,7 @@ export function AdminDashboardPage() {
                   <td className="px-4 py-4" />
                   <td className="px-4 py-4" />
                   <td className="px-4 py-4 font-bold text-emerald-300">{formatCurrency(totalAPagarSemana)}</td>
+                  <td className="px-4 py-4" />
                 </tr>
               </tbody>
               <tfoot className="hidden">
