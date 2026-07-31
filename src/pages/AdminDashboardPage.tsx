@@ -57,6 +57,13 @@ function usaResumenTermicoPorDia(proceso: string) {
     || nombreNormalizado === 'servicio';
 }
 
+function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
+  const normalizado = proceso.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  if (normalizado.startsWith('lav')) return 'lavado';
+  if (normalizado.startsWith('aglut')) return 'aglutinado';
+  return null;
+}
+
 export function AdminDashboardPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
@@ -78,8 +85,11 @@ export function AdminDashboardPage() {
   const [adminRegistroProceso, setAdminRegistroProceso] = useState<RegistroDiario['proceso']>('Picador');
   const [adminRegistroMaterial, setAdminRegistroMaterial] = useState<RegistroDiario['material']>('Poli');
   const [adminRegistroKilos, setAdminRegistroKilos] = useState('');
+  const [adminEmpleadoPareadoId, setAdminEmpleadoPareadoId] = useState('');
+  const [adminSopladoKg, setAdminSopladoKg] = useState('0');
   const [registrosIngresoLibre, setRegistrosIngresoLibre] = useState<RegistroDiario[]>([]);
   const [cargandoIngresoLibre, setCargandoIngresoLibre] = useState(false);
+  const solicitudIngresoActual = useRef(0);
   const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
   const [registroProcesoEditValues, setRegistroProcesoEditValues] = useState<Record<string, Proceso>>({});
   const [nuevoEmpleadoNombre, setNuevoEmpleadoNombre] = useState('');
@@ -108,6 +118,8 @@ export function AdminDashboardPage() {
   const [procesoEditValues, setProcesoEditValues] = useState<Record<string, string>>({});
   const [nuevoMaterialCodigo, setNuevoMaterialCodigo] = useState('');
   const [nuevoMaterialNombre, setNuevoMaterialNombre] = useState('');
+  const [nuevoMaterialLavado, setNuevoMaterialLavado] = useState(false);
+  const [nuevoMaterialAglutinado, setNuevoMaterialAglutinado] = useState(false);
   const [materialEditValues, setMaterialEditValues] = useState<Record<string, string>>({});
 
   const weekDates = useMemo(() => {
@@ -179,7 +191,7 @@ export function AdminDashboardPage() {
         setProcesoEditValues(Object.fromEntries(items.map((item) => [item.nombre, item.nombre])));
       }
     });
-    supabase.from('materiales').select('codigo,nombre').order('nombre').then(({ data }) => {
+    supabase.from('materiales').select('codigo,nombre,requiere_lavado,requiere_aglutinado').order('nombre').then(({ data }) => {
       if (data) {
         const items = data as CatalogoMaterial[];
         setCatalogoMateriales(items);
@@ -310,12 +322,16 @@ export function AdminDashboardPage() {
     if (!isAdmin || !adminRegistroDate) return;
 
     setCargandoIngresoLibre(true);
+    setRegistrosIngresoLibre([]);
+    setAdminSopladoKg('0');
+    const numeroSolicitud = ++solicitudIngresoActual.current;
     supabase
       .from('registros_diarios')
       .select('*')
       .eq('fecha', adminRegistroDate)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
+        if (numeroSolicitud !== solicitudIngresoActual.current) return;
         if (!error) {
           const items = (data as RegistroDiario[]) ?? [];
           setRegistrosIngresoLibre(items);
@@ -327,12 +343,54 @@ export function AdminDashboardPage() {
             ...current,
             ...Object.fromEntries(items.map((item) => [item.id, item.proceso]))
           }));
+          const ajuste = items.find((item) => item.es_ajuste_soplado);
+          setAdminSopladoKg(ajuste ? Math.abs(ajuste.peso_kg ?? 0).toString() : '0');
         } else {
           notify('error', `No se pudieron cargar los registros de la fecha: ${error.message}`);
         }
         setCargandoIngresoLibre(false);
       });
   }, [adminRegistroDate, isAdmin]);
+
+  const adminEtapaActual = etapaDelProceso(adminRegistroProceso);
+  const adminMaterialSeleccionado = catalogoMateriales.find((item) => item.codigo === adminRegistroMaterial);
+  const adminMaterialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
+    if (item.codigo === 'Soplado') return false;
+    if (adminEtapaActual === 'lavado') return item.requiere_lavado;
+    if (adminEtapaActual === 'aglutinado') return item.requiere_aglutinado;
+    return true;
+  }), [adminEtapaActual, catalogoMateriales]);
+  const adminRequierePareado = Boolean(
+    adminEtapaActual
+    && adminMaterialSeleccionado?.requiere_lavado
+    && adminMaterialSeleccionado?.requiere_aglutinado
+  );
+  const adminEtapaPareada = adminEtapaActual === 'lavado' ? 'aglutinado' : adminEtapaActual === 'aglutinado' ? 'lavado' : null;
+  const adminProcesoPareado = catalogoProcesos.find((item) => etapaDelProceso(item.nombre) === adminEtapaPareada)?.nombre ?? '';
+  const adminEmpleadosPareados = useMemo(
+    () => empleados.filter((empleado) => empleado.id !== adminRegistroEmpleadoId && empleado.procesos_asignados.includes(adminProcesoPareado)),
+    [adminProcesoPareado, adminRegistroEmpleadoId, empleados]
+  );
+  const ajustesSopladoAdmin = useMemo(
+    () => registrosIngresoLibre.filter((item) => item.es_ajuste_soplado),
+    [registrosIngresoLibre]
+  );
+  const adminAjusteSopladoRegistrado = ajustesSopladoAdmin.length > 0;
+
+  useEffect(() => {
+    const codigos = adminMaterialesDisponibles.map((item) => item.codigo);
+    if (codigos.length && !codigos.includes(adminRegistroMaterial)) setAdminRegistroMaterial(codigos[0]);
+  }, [adminMaterialesDisponibles, adminRegistroMaterial]);
+
+  useEffect(() => {
+    if (!adminRequierePareado) {
+      setAdminEmpleadoPareadoId('');
+      return;
+    }
+    if (!adminEmpleadosPareados.some((item) => item.id === adminEmpleadoPareadoId)) {
+      setAdminEmpleadoPareadoId(adminEmpleadosPareados[0]?.id ?? '');
+    }
+  }, [adminEmpleadoPareadoId, adminEmpleadosPareados, adminRequierePareado]);
 
   const registrosPorEmpleadoYDia = useMemo(() => {
     if (!selectedEmpleadoId || !selectedWeekDate) return [];
@@ -365,7 +423,19 @@ export function AdminDashboardPage() {
   async function handleAdminCrearRegistro() {
     if (!adminRegistroEmpleadoId || !adminRegistroKilos) return;
     const kilos = Number(adminRegistroKilos);
-    if (Number.isNaN(kilos) || kilos < 0) return;
+    const soplado = Number(adminSopladoKg || 0);
+    if (!Number.isFinite(kilos) || kilos <= 0) {
+      notify('error', 'Ingresa una cantidad de kilos mayor que cero.');
+      return;
+    }
+    if (!Number.isFinite(soplado) || soplado < 0) {
+      notify('error', 'El soplado no puede ser negativo.');
+      return;
+    }
+    if (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId)) {
+      notify('error', 'Selecciona el empleado del proceso complementario.');
+      return;
+    }
 
     setLoadingAction(true);
     const newRecord = {
@@ -378,35 +448,58 @@ export function AdminDashboardPage() {
       creado_por: profile?.id ?? ''
     };
 
+    const registrosNuevos: Array<Omit<RegistroDiario, 'id'>> = adminRequierePareado
+      ? [newRecord, { ...newRecord, empleado_id: adminEmpleadoPareadoId, proceso: adminProcesoPareado }]
+      : [newRecord];
+
+    if (adminRequierePareado && !adminAjusteSopladoRegistrado) {
+      registrosNuevos.push(
+        { ...newRecord, material: 'Soplado', material_referencia: adminRegistroMaterial, peso_kg: -soplado, es_ajuste_soplado: true },
+        { ...newRecord, empleado_id: adminEmpleadoPareadoId, proceso: adminProcesoPareado, material: 'Soplado', material_referencia: adminRegistroMaterial, peso_kg: -soplado, es_ajuste_soplado: true }
+      );
+    }
+
     const { data, error } = await supabase
       .from('registros_diarios')
-      .insert(newRecord)
-      .select()
-      .single();
+      .insert(registrosNuevos)
+      .select();
     if (!error && data) {
-      const registroCreado = data as RegistroDiario;
-      setRegistrosIngresoLibre((current) => [
-        registroCreado,
-        ...current.filter((item) => item.id !== registroCreado.id)
-      ]);
-      if (weekDates.includes(registroCreado.fecha)) {
-        setRegistros((current) => [...current, registroCreado]);
-        setRegistroEditValues((current) => ({
-          ...current,
-          [registroCreado.id]: registroCreado.peso_kg?.toString() ?? ''
-        }));
-        setRegistroProcesoEditValues((current) => ({
-          ...current,
-          [registroCreado.id]: registroCreado.proceso
-        }));
-      }
-      if (registroCreado.fecha >= rangoAnalitica.inicio && registroCreado.fecha <= rangoAnalitica.fin) {
-        setRegistrosAnalitica((current) => [...current, registroCreado]);
-      }
+      const creados = data as RegistroDiario[];
+      setRegistrosIngresoLibre((current) => [...creados, ...current]);
+      const creadosSemana = creados.filter((item) => weekDates.includes(item.fecha));
+      if (creadosSemana.length) setRegistros((current) => [...current, ...creadosSemana]);
+      const creadosAnalitica = creados.filter((item) => item.fecha >= rangoAnalitica.inicio && item.fecha <= rangoAnalitica.fin);
+      if (creadosAnalitica.length) setRegistrosAnalitica((current) => [...current, ...creadosAnalitica]);
+      setRegistroEditValues((current) => ({ ...current, ...Object.fromEntries(creados.map((item) => [item.id, item.peso_kg?.toString() ?? ''])) }));
+      setRegistroProcesoEditValues((current) => ({ ...current, ...Object.fromEntries(creados.map((item) => [item.id, item.proceso])) }));
       setAdminRegistroKilos('');
-      notify('success', 'El registro de kilos fue creado y los consolidados se actualizaron.');
+      notify('success', adminRequierePareado ? 'Lavado, aglutinado y soplado fueron aplicados a la fecha seleccionada.' : 'El registro de kilos fue creado y los consolidados se actualizaron.');
     } else {
       notify('error', `No se pudo crear el registro: ${error?.message ?? 'error desconocido'}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleAdminActualizarSoplado() {
+    const cantidad = Number(adminSopladoKg || 0);
+    if (!Number.isFinite(cantidad) || cantidad < 0 || !adminAjusteSopladoRegistrado) return;
+    setLoadingAction(true);
+    const { data, error } = await supabase
+      .from('registros_diarios')
+      .update({ peso_kg: -cantidad })
+      .eq('fecha', adminRegistroDate)
+      .eq('es_ajuste_soplado', true)
+      .select();
+    if (!error && data) {
+      const actualizados = data as RegistroDiario[];
+      const integrar = (items: RegistroDiario[]) => items.map((item) => actualizados.find((ajuste) => ajuste.id === item.id) ?? item);
+      setRegistrosIngresoLibre(integrar);
+      setRegistros(integrar);
+      setRegistrosAnalitica(integrar);
+      setRegistroEditValues((current) => ({ ...current, ...Object.fromEntries(actualizados.map((item) => [item.id, item.peso_kg?.toString() ?? ''])) }));
+      notify('success', `Soplado actualizado a ${cantidad.toLocaleString('es-CO')} kg para ${adminRegistroDate}.`);
+    } else {
+      notify('error', `No se pudo actualizar el soplado: ${error?.message ?? 'error desconocido'}`);
     }
     setLoadingAction(false);
   }
@@ -476,7 +569,9 @@ export function AdminDashboardPage() {
           material,
           kilosPorDia,
           totalKilos,
-          totalPagar: totalKilos * getTarifaPrecio(proceso, material)
+          totalPagar: registros
+            .filter((registro) => weekDates.includes(registro.fecha) && registro.proceso === proceso && registro.material === material)
+            .reduce((total, registro) => total + ((registro.peso_kg ?? 0) * getTarifaRegistro(registro)), 0)
         };
         }),
         totalesPorDia: weekDates.map((fecha) =>
@@ -491,7 +586,7 @@ export function AdminDashboardPage() {
           .filter((registro) => weekDates.includes(registro.fecha) && registro.proceso === proceso)
           .reduce(
             (total, registro) =>
-              total + ((registro.peso_kg ?? 0) * getTarifaPrecio(registro.proceso, registro.material)),
+              total + ((registro.peso_kg ?? 0) * getTarifaRegistro(registro)),
             0
           )
       }]
@@ -523,7 +618,7 @@ export function AdminDashboardPage() {
       .filter((registro) => weekDates.includes(registro.fecha))
       .reduce(
         (total, registro) =>
-          total + ((registro.peso_kg ?? 0) * getTarifaPrecio(registro.proceso, registro.material)),
+          total + ((registro.peso_kg ?? 0) * getTarifaRegistro(registro)),
         totalPagosAdicionalesSemana
       ),
     [registros, tarifas, totalPagosAdicionalesSemana, weekDates]
@@ -541,7 +636,7 @@ export function AdminDashboardPage() {
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
     const totalKg = registrosEmpleado.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
     const subtotalProduccion = registrosEmpleado.reduce(
-      (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)),
+      (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)),
       0
     );
     const pagoAdicional = getPagoAdicional(empleado.id);
@@ -557,7 +652,7 @@ export function AdminDashboardPage() {
       const items = registrosEmpleado.filter((item) => item.fecha === fecha);
       const totalDiaKg = items.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
       const totalDiaPago = items.reduce(
-        (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)),
+        (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)),
         0
       );
       const mostrarSoloResumen = items.some((item) => usaResumenTermicoPorDia(item.proceso));
@@ -566,7 +661,7 @@ export function AdminDashboardPage() {
           ? ''
           : items.map((item) => {
           const kilos = item.peso_kg ?? 0;
-          const precio = getTarifaPrecio(item.proceso, item.material);
+          const precio = getTarifaRegistro(item);
           return `<div class="item">
             <div>${escapeReceiptText(item.proceso)} · ${escapeReceiptText(materialDisplayNames[item.material] ?? item.material)}</div>
             <div class="line"><span>${kilos.toLocaleString('es-CO')} kg × ${formatCurrency(precio)}</span><strong>${formatCurrency(kilos * precio)}</strong></div>
@@ -750,7 +845,7 @@ export function AdminDashboardPage() {
       const pagoAdicional = getPagoAdicional(empleado.id);
       const totalPagar = registros
         .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
-        .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0)
+        .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0)
         + pagoAdicional;
       return {
         semana_inicio: weekDates[0],
@@ -998,12 +1093,24 @@ export function AdminDashboardPage() {
     if (!codigo || !nombre) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('materiales').insert({ codigo, nombre }).select('codigo,nombre').single();
+    if (!nuevoMaterialLavado && !nuevoMaterialAglutinado) {
+      notify('error', 'Selecciona al menos un proceso requerido para el material.');
+      return;
+    }
+
+    const { data, error } = await supabase.from('materiales').insert({
+      codigo,
+      nombre,
+      requiere_lavado: nuevoMaterialLavado,
+      requiere_aglutinado: nuevoMaterialAglutinado
+    }).select('codigo,nombre,requiere_lavado,requiere_aglutinado').single();
     if (!error && data) {
       setCatalogoMateriales((current) => [...current, data as CatalogoMaterial].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setMaterialEditValues((current) => ({ ...current, [codigo]: nombre }));
       setNuevoMaterialCodigo('');
       setNuevoMaterialNombre('');
+      setNuevoMaterialLavado(false);
+      setNuevoMaterialAglutinado(false);
       notify('success', 'El material fue creado y ya está disponible en los selectores.');
     } else {
       notify('error', `No se pudo crear el material: ${error?.message ?? 'error desconocido'}`);
@@ -1012,9 +1119,21 @@ export function AdminDashboardPage() {
   }
 
   async function handleActualizarMaterial(material: CatalogoMaterial) {
+    if (material.codigo === 'Soplado') {
+      notify('error', 'Soplado es un material interno y no se puede modificar.');
+      return;
+    }
     const nombre = materialEditValues[material.codigo]?.trim();
     if (!nombre) return;
-    const { error } = await supabase.from('materiales').update({ nombre }).eq('codigo', material.codigo);
+    if (!material.requiere_lavado && !material.requiere_aglutinado) {
+      notify('error', 'El material debe requerir al menos lavado o aglutinado.');
+      return;
+    }
+    const { error } = await supabase.from('materiales').update({
+      nombre,
+      requiere_lavado: material.requiere_lavado,
+      requiere_aglutinado: material.requiere_aglutinado
+    }).eq('codigo', material.codigo);
     if (!error) {
       setCatalogoMateriales((current) => current
         .map((item) => item.codigo === material.codigo ? { ...item, nombre } : item)
@@ -1027,6 +1146,10 @@ export function AdminDashboardPage() {
   }
 
   async function handleEliminarMaterial(codigo: string) {
+    if (codigo === 'Soplado') {
+      notify('error', 'Soplado es necesario para los descuentos diarios y no se puede eliminar.');
+      return;
+    }
     if (!window.confirm(`¿Eliminar el material "${materialDisplayNames[codigo] ?? codigo}"?`)) return;
     const { error } = await supabase.from('materiales').delete().eq('codigo', codigo);
     if (!error) {
@@ -1064,6 +1187,10 @@ export function AdminDashboardPage() {
     return tarifas.find((tarifa) => tarifa.proceso === proceso && tarifa.material === material)?.precio_unidad ?? 0;
   }
 
+  function getTarifaRegistro(registro: RegistroDiario) {
+    return getTarifaPrecio(registro.proceso, registro.material_referencia ?? registro.material);
+  }
+
   function getPagoAdicional(empleadoId: string) {
     return pagosAdicionales.filter((pago) => pago.empleado_id === empleadoId).reduce((sum, pago) => sum + pago.valor, 0);
   }
@@ -1081,7 +1208,7 @@ export function AdminDashboardPage() {
       const pagoAdicional = getPagoAdicional(empleado.id);
       const totalPago = registros
         .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
-        .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0)
+        .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0)
         + pagoAdicional;
       return [empleado.nombre, ...values, totalKg.toFixed(0), pagoAdicional.toFixed(2), totalPago.toFixed(2)];
     });
@@ -1339,7 +1466,7 @@ export function AdminDashboardPage() {
                   <Icon name="chevronRight" className="h-5 w-5 text-slate-400 transition-transform group-open:rotate-90" />
                 </summary>
                 <div className="space-y-4 border-t border-slate-800 p-5">
-                  <form onSubmit={handleCrearMaterial} className="grid gap-3 sm:grid-cols-[120px_1fr_auto]">
+                  <form onSubmit={handleCrearMaterial} className="grid gap-3 lg:grid-cols-[120px_1fr_auto_auto_auto] lg:items-center">
                     <input
                       value={nuevoMaterialCodigo}
                       onChange={(event) => setNuevoMaterialCodigo(event.target.value)}
@@ -1354,13 +1481,21 @@ export function AdminDashboardPage() {
                       className="field"
                       required
                     />
+                    <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 text-sm text-slate-300">
+                      <input type="checkbox" checked={nuevoMaterialLavado} onChange={(event) => setNuevoMaterialLavado(event.target.checked)} className="h-4 w-4" />
+                      Lavado
+                    </label>
+                    <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 text-sm text-slate-300">
+                      <input type="checkbox" checked={nuevoMaterialAglutinado} onChange={(event) => setNuevoMaterialAglutinado(event.target.checked)} className="h-4 w-4" />
+                      Aglutinado
+                    </label>
                     <button type="submit" disabled={loadingAction} className="btn-primary">
                       <Icon name="plus" className="h-4 w-4" /> Agregar
                     </button>
                   </form>
                   <div className="space-y-2">
                     {catalogoMateriales.map((material) => (
-                      <div key={material.codigo} className="grid gap-2 rounded-2xl border border-slate-800 p-3 sm:grid-cols-[90px_1fr_auto_auto]">
+                      <div key={material.codigo} className="grid gap-3 rounded-2xl border border-slate-800 p-3 xl:grid-cols-[90px_minmax(180px,1fr)_auto_auto_auto_auto] xl:items-center">
                         <div className="flex items-center rounded-xl bg-slate-900 px-3 text-xs font-bold text-slate-400">{material.codigo}</div>
                         <input
                           value={materialEditValues[material.codigo] ?? material.nombre}
@@ -1370,6 +1505,24 @@ export function AdminDashboardPage() {
                           }))}
                           className="field"
                         />
+                        <label className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-900/70 px-3 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={material.requiere_lavado}
+                            onChange={(event) => setCatalogoMateriales((current) => current.map((item) => item.codigo === material.codigo ? { ...item, requiere_lavado: event.target.checked } : item))}
+                            className="h-4 w-4"
+                          />
+                          Lavado
+                        </label>
+                        <label className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-900/70 px-3 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={material.requiere_aglutinado}
+                            onChange={(event) => setCatalogoMateriales((current) => current.map((item) => item.codigo === material.codigo ? { ...item, requiere_aglutinado: event.target.checked } : item))}
+                            className="h-4 w-4"
+                          />
+                          Aglutinado
+                        </label>
                         <button type="button" onClick={() => handleActualizarMaterial(material)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
                           Guardar
                         </button>
@@ -1614,7 +1767,7 @@ export function AdminDashboardPage() {
                         {formatCurrency(
                           registros
                             .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
-                            .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0)
+                            .reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0)
                           + getPagoAdicional(empleado.id)
                         )}
                       </td>
@@ -1946,20 +2099,65 @@ export function AdminDashboardPage() {
                     onChange={(event) => setAdminRegistroMaterial(event.target.value as RegistroDiario['material'])}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
-                    {materiales.map((material) => (
-                      <option key={material} value={material}>{materialDisplayNames[material]}</option>
+                    {adminMaterialesDisponibles.map((material) => (
+                      <option key={material.codigo} value={material.codigo}>{material.nombre}</option>
                     ))}
                   </select>
                 </label>
-                <button
-                  type="button"
-                  onClick={handleAdminCrearRegistro}
-                  disabled={loadingAction}
-                  className="h-full rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-60"
-                >
-                  Registrar kilos
-                </button>
               </div>
+
+              {(adminRequierePareado || adminAjusteSopladoRegistrado) && (
+                <div className="mt-4 rounded-2xl border border-indigo-500/20 bg-indigo-500/[.06] p-4">
+                  <div className="mb-4">
+                    <p className="text-sm font-semibold text-white">Lavado, aglutinado y soplado</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">La fecha seleccionada controla el único ajuste de soplado permitido para ese día.</p>
+                  </div>
+                  {adminRequierePareado && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-2">
+                        <span className="text-sm text-slate-300">Proceso complementario</span>
+                        <select value={adminProcesoPareado} disabled className="field">
+                          <option value={adminProcesoPareado}>{adminProcesoPareado || 'No configurado'}</option>
+                        </select>
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm text-slate-300">Empleado de {adminProcesoPareado || 'proceso complementario'}</span>
+                        <select value={adminEmpleadoPareadoId} onChange={(event) => setAdminEmpleadoPareadoId(event.target.value)} className="field">
+                          {adminEmpleadosPareados.length === 0 && <option value="">No hay empleados disponibles</option>}
+                          {adminEmpleadosPareados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                  <div className={`grid gap-3 ${adminAjusteSopladoRegistrado ? 'mt-4 sm:grid-cols-[1fr_auto] sm:items-end' : adminRequierePareado ? 'mt-4' : ''}`}>
+                    <label className="space-y-2">
+                      <span className="flex items-center justify-between gap-3 text-sm text-slate-300">
+                        Soplado de {adminRegistroDate}
+                        <span className={adminAjusteSopladoRegistrado ? 'badge-success' : 'badge-warning'}>{adminAjusteSopladoRegistrado ? 'Registrado' : 'Nuevo'}</span>
+                      </span>
+                      <div className="relative">
+                        <input type="number" min="0" step="0.1" inputMode="decimal" value={adminSopladoKg} onChange={(event) => setAdminSopladoKg(event.target.value)} className="field pr-12 text-lg font-semibold" />
+                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">kg</span>
+                      </div>
+                    </label>
+                    {adminAjusteSopladoRegistrado && (
+                      <button type="button" onClick={() => void handleAdminActualizarSoplado()} disabled={loadingAction} className="btn-secondary">
+                        Guardar corrección
+                      </button>
+                    )}
+                  </div>
+                  {adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId) && <p role="alert" className="mt-3 text-xs font-medium text-amber-300">Configura un empleado activo para el proceso complementario antes de registrar.</p>}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void handleAdminCrearRegistro()}
+                disabled={loadingAction || !adminRegistroKilos || (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
+                className="btn-primary mt-4 w-full bg-emerald-500 hover:bg-emerald-400"
+              >
+                <Icon name="plus" className="h-4 w-4" /> Registrar kilos
+              </button>
               <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-xs text-slate-400">
                 <span>La fecha, el empleado, el proceso y el material también filtran la tabla.</span>
                 <span className="font-semibold text-slate-200">
@@ -2114,7 +2312,7 @@ export function AdminDashboardPage() {
               <div className="mt-6 space-y-3 text-slate-300">
                 <p>Total empleados: {empleados.length}</p>
                 <p>Total pagos extras: {formatCurrency(pagosAdicionales.reduce((sum, pago) => sum + pago.valor, 0))}</p>
-                <p className="font-semibold">Total a pagar general: {formatCurrency(empleados.reduce((sum, empleado) => sum + (registros.filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha)).reduce((inner, item) => inner + ((item.peso_kg ?? 0) * getTarifaPrecio(item.proceso, item.material)), 0) + getPagoAdicional(empleado.id)), 0))}</p>
+                <p className="font-semibold">Total a pagar general: {formatCurrency(empleados.reduce((sum, empleado) => sum + (registros.filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha)).reduce((inner, item) => inner + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0) + getPagoAdicional(empleado.id)), 0))}</p>
               </div>
             </div>
           </div>

@@ -43,6 +43,10 @@ Aplicación PWA para reemplazar la planilla física de nómina de Plastic Center
 
 Para una base de datos existente, ejecuta `supabase-gerencial-role.sql` en Supabase SQL Editor. La migración agrega el rol y restringe mediante RLS las operaciones de escritura a los roles autorizados.
 
+La migración `supabase/migrations/20260731120000_flujo_materiales_encadenado.sql` agrega la configuración de lavado y aglutinado por material. Debe aplicarse antes de usar el registro enlazado de producción.
+
+La migración `supabase/migrations/20260731150000_ajuste_soplado_diario.sql` crea el ajuste único de soplado por fecha y proceso, junto con el permiso para que el encargado lo corrija únicamente durante la jornada actual.
+
 ## Despliegue
 
 Se recomienda Vercel o Netlify en su plan gratuito:

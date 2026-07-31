@@ -24,6 +24,8 @@ export interface CatalogoProceso {
 export interface CatalogoMaterial {
   codigo: string;
   nombre: string;
+  requiere_lavado: boolean;
+  requiere_aglutinado: boolean;
 }
 
 export interface Tarifa {
@@ -72,4 +74,6 @@ export interface RegistroDiario {
   peso_kg: number | null;
   cantidad_bultos: number | null;
   creado_por: string;
+  es_ajuste_soplado?: boolean;
+  material_referencia?: Material | null;
 }
