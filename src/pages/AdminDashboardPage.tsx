@@ -64,6 +64,12 @@ function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
   return null;
 }
 
+function esMaterialSoplado(material: CatalogoMaterial) {
+  const nombre = material.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  const codigo = material.codigo.trim().toLowerCase();
+  return nombre === 'soplado' || codigo === 'soplado';
+}
+
 export function AdminDashboardPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
@@ -79,7 +85,7 @@ export function AdminDashboardPage() {
   const [cargandoSemana, setCargandoSemana] = useState(false);
   const solicitudSemanaActual = useRef(0);
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
-  const [selectedWeekDate, setSelectedWeekDate] = useState('');
+  const [selectedWeekDate, setSelectedWeekDate] = useState(formatLocalDate(new Date()));
   const [adminRegistroEmpleadoId, setAdminRegistroEmpleadoId] = useState('');
   const [adminRegistroDate, setAdminRegistroDate] = useState(formatLocalDate(new Date()));
   const [adminRegistroProceso, setAdminRegistroProceso] = useState<RegistroDiario['proceso']>('Picador');
@@ -305,13 +311,6 @@ export function AdminDashboardPage() {
   }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
 
   useEffect(() => {
-    if (weekDates.length && !weekDates.includes(selectedWeekDate)) {
-      setSelectedWeekDate(weekDates[0]);
-      setAdminRegistroDate(weekDates[0]);
-    }
-  }, [weekDates, selectedWeekDate]);
-
-  useEffect(() => {
     const empleado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
     if (empleado) {
       setAdminRegistroProceso(empleado.procesos_asignados[0] ?? empleado.proceso_habitual);
@@ -354,8 +353,9 @@ export function AdminDashboardPage() {
 
   const adminEtapaActual = etapaDelProceso(adminRegistroProceso);
   const adminMaterialSeleccionado = catalogoMateriales.find((item) => item.codigo === adminRegistroMaterial);
+  const codigoSoplado = catalogoMateriales.find(esMaterialSoplado)?.codigo ?? '';
   const adminMaterialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
-    if (item.codigo === 'Soplado') return false;
+    if (esMaterialSoplado(item)) return false;
     if (adminEtapaActual === 'lavado') return item.requiere_lavado;
     if (adminEtapaActual === 'aglutinado') return item.requiere_aglutinado;
     return true;
@@ -421,15 +421,13 @@ export function AdminDashboardPage() {
   );
 
   async function handleAdminCrearRegistro() {
-    if (!adminRegistroEmpleadoId || !adminRegistroKilos) return;
-    const kilos = Number(adminRegistroKilos);
-    const soplado = Number(adminSopladoKg || 0);
-    if (!Number.isFinite(kilos) || kilos <= 0) {
-      notify('error', 'Ingresa una cantidad de kilos mayor que cero.');
+    if (!adminRegistroEmpleadoId || !adminRegistroKilos) {
+      notify('error', 'Selecciona un empleado e ingresa los kilos antes de registrar.');
       return;
     }
-    if (!Number.isFinite(soplado) || soplado < 0) {
-      notify('error', 'El soplado no puede ser negativo.');
+    const kilos = Number(adminRegistroKilos);
+    if (!Number.isFinite(kilos) || kilos <= 0) {
+      notify('error', 'Ingresa una cantidad de kilos mayor que cero.');
       return;
     }
     if (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId)) {
@@ -452,13 +450,6 @@ export function AdminDashboardPage() {
       ? [newRecord, { ...newRecord, empleado_id: adminEmpleadoPareadoId, proceso: adminProcesoPareado }]
       : [newRecord];
 
-    if (adminRequierePareado && !adminAjusteSopladoRegistrado) {
-      registrosNuevos.push(
-        { ...newRecord, material: 'Soplado', material_referencia: adminRegistroMaterial, peso_kg: -soplado, es_ajuste_soplado: true },
-        { ...newRecord, empleado_id: adminEmpleadoPareadoId, proceso: adminProcesoPareado, material: 'Soplado', material_referencia: adminRegistroMaterial, peso_kg: -soplado, es_ajuste_soplado: true }
-      );
-    }
-
     const { data, error } = await supabase
       .from('registros_diarios')
       .insert(registrosNuevos)
@@ -473,7 +464,7 @@ export function AdminDashboardPage() {
       setRegistroEditValues((current) => ({ ...current, ...Object.fromEntries(creados.map((item) => [item.id, item.peso_kg?.toString() ?? ''])) }));
       setRegistroProcesoEditValues((current) => ({ ...current, ...Object.fromEntries(creados.map((item) => [item.id, item.proceso])) }));
       setAdminRegistroKilos('');
-      notify('success', adminRequierePareado ? 'Lavado, aglutinado y soplado fueron aplicados a la fecha seleccionada.' : 'El registro de kilos fue creado y los consolidados se actualizaron.');
+      notify('success', adminRequierePareado ? 'Los kilos de lavado y aglutinado fueron registrados.' : 'El registro de kilos fue creado y los consolidados se actualizaron.');
     } else {
       notify('error', `No se pudo crear el registro: ${error?.message ?? 'error desconocido'}`);
     }
@@ -482,22 +473,61 @@ export function AdminDashboardPage() {
 
   async function handleAdminActualizarSoplado() {
     const cantidad = Number(adminSopladoKg || 0);
-    if (!Number.isFinite(cantidad) || cantidad < 0 || !adminAjusteSopladoRegistrado) return;
+    if (!Number.isFinite(cantidad) || cantidad < 0) {
+      notify('error', 'El soplado debe ser un número igual o mayor que cero.');
+      return;
+    }
+    if (!adminAjusteSopladoRegistrado && (!adminRequierePareado || !adminProcesoPareado || !adminEmpleadoPareadoId)) {
+      notify('error', 'Selecciona los empleados de lavado y aglutinado antes de crear el soplado.');
+      return;
+    }
+    if (!adminAjusteSopladoRegistrado && !codigoSoplado) {
+      notify('error', 'No se encontró el material interno Soplado. Aplica la migración antes de guardarlo.');
+      return;
+    }
     setLoadingAction(true);
-    const { data, error } = await supabase
-      .from('registros_diarios')
-      .update({ peso_kg: -cantidad })
-      .eq('fecha', adminRegistroDate)
-      .eq('es_ajuste_soplado', true)
-      .select();
+    const baseSoplado = {
+      empleado_id: adminRegistroEmpleadoId,
+      fecha: adminRegistroDate,
+      proceso: adminRegistroProceso,
+      material: codigoSoplado,
+      material_referencia: adminRegistroMaterial,
+      peso_kg: -cantidad,
+      cantidad_bultos: null,
+      creado_por: profile?.id ?? '',
+      es_ajuste_soplado: true
+    };
+    const resultado = adminAjusteSopladoRegistrado
+      ? await supabase
+        .from('registros_diarios')
+        .update({ peso_kg: -cantidad })
+        .eq('fecha', adminRegistroDate)
+        .eq('es_ajuste_soplado', true)
+        .select()
+      : await supabase
+        .from('registros_diarios')
+        .insert([
+          baseSoplado,
+          { ...baseSoplado, empleado_id: adminEmpleadoPareadoId, proceso: adminProcesoPareado }
+        ])
+        .select();
+    const { data, error } = resultado;
     if (!error && data) {
       const actualizados = data as RegistroDiario[];
-      const integrar = (items: RegistroDiario[]) => items.map((item) => actualizados.find((ajuste) => ajuste.id === item.id) ?? item);
-      setRegistrosIngresoLibre(integrar);
-      setRegistros(integrar);
-      setRegistrosAnalitica(integrar);
+      const reemplazar = (items: RegistroDiario[]) => items.map((item) => actualizados.find((ajuste) => ajuste.id === item.id) ?? item);
+      if (adminAjusteSopladoRegistrado) {
+        setRegistrosIngresoLibre(reemplazar);
+        setRegistros(reemplazar);
+        setRegistrosAnalitica(reemplazar);
+      } else {
+        setRegistrosIngresoLibre((current) => [...actualizados, ...current]);
+        if (weekDates.includes(adminRegistroDate)) setRegistros((current) => [...current, ...actualizados]);
+        if (adminRegistroDate >= rangoAnalitica.inicio && adminRegistroDate <= rangoAnalitica.fin) {
+          setRegistrosAnalitica((current) => [...current, ...actualizados]);
+        }
+      }
       setRegistroEditValues((current) => ({ ...current, ...Object.fromEntries(actualizados.map((item) => [item.id, item.peso_kg?.toString() ?? ''])) }));
-      notify('success', `Soplado actualizado a ${cantidad.toLocaleString('es-CO')} kg para ${adminRegistroDate}.`);
+      notify('success', `Soplado guardado en ${cantidad.toLocaleString('es-CO')} kg para ${adminRegistroDate}.`);
     } else {
       notify('error', `No se pudo actualizar el soplado: ${error?.message ?? 'error desconocido'}`);
     }
@@ -1119,7 +1149,7 @@ export function AdminDashboardPage() {
   }
 
   async function handleActualizarMaterial(material: CatalogoMaterial) {
-    if (material.codigo === 'Soplado') {
+    if (esMaterialSoplado(material)) {
       notify('error', 'Soplado es un material interno y no se puede modificar.');
       return;
     }
@@ -1146,7 +1176,7 @@ export function AdminDashboardPage() {
   }
 
   async function handleEliminarMaterial(codigo: string) {
-    if (codigo === 'Soplado') {
+    if (catalogoMateriales.some((material) => material.codigo === codigo && esMaterialSoplado(material))) {
       notify('error', 'Soplado es necesario para los descuentos diarios y no se puede eliminar.');
       return;
     }
@@ -2140,11 +2170,14 @@ export function AdminDashboardPage() {
                         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">kg</span>
                       </div>
                     </label>
-                    {adminAjusteSopladoRegistrado && (
-                      <button type="button" onClick={() => void handleAdminActualizarSoplado()} disabled={loadingAction} className="btn-secondary">
-                        Guardar corrección
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleAdminActualizarSoplado()}
+                      disabled={loadingAction || (!adminAjusteSopladoRegistrado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
+                      className="btn-secondary"
+                    >
+                      <Icon name="check" className="h-4 w-4" /> {adminAjusteSopladoRegistrado ? 'Guardar corrección' : 'Guardar soplado'}
+                    </button>
                   </div>
                   {adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId) && <p role="alert" className="mt-3 text-xs font-medium text-amber-300">Configura un empleado activo para el proceso complementario antes de registrar.</p>}
                 </div>
@@ -2153,7 +2186,7 @@ export function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={() => void handleAdminCrearRegistro()}
-                disabled={loadingAction || !adminRegistroKilos || (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
+                disabled={loadingAction || (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
                 className="btn-primary mt-4 w-full bg-emerald-500 hover:bg-emerald-400"
               >
                 <Icon name="plus" className="h-4 w-4" /> Registrar kilos

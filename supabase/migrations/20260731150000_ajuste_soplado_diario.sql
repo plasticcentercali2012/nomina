@@ -4,12 +4,21 @@ alter table public.registros_diarios
   add column if not exists es_ajuste_soplado boolean not null default false,
   add column if not exists material_referencia text;
 
-insert into public.materiales (codigo, nombre, requiere_lavado, requiere_aglutinado)
-values ('Soplado', 'Soplado', false, false)
-on conflict (codigo) do update
-set nombre = excluded.nombre,
-    requiere_lavado = false,
-    requiere_aglutinado = false;
+do $$
+begin
+  if exists (select 1 from public.materiales where lower(trim(nombre)) = 'soplado') then
+    update public.materiales
+    set requiere_lavado = false,
+        requiere_aglutinado = false
+    where lower(trim(nombre)) = 'soplado';
+  else
+    insert into public.materiales (codigo, nombre, requiere_lavado, requiere_aglutinado)
+    values ('Soplado', 'Soplado', false, false)
+    on conflict (codigo) do update
+    set requiere_lavado = false,
+        requiere_aglutinado = false;
+  end if;
+end $$;
 
 create unique index if not exists registros_soplado_unico_fecha_proceso
   on public.registros_diarios (fecha, proceso)

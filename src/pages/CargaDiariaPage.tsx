@@ -28,6 +28,12 @@ function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
   return null;
 }
 
+function esMaterialSoplado(material: CatalogoMaterial) {
+  const nombre = material.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  const codigo = material.codigo.trim().toLowerCase();
+  return nombre === 'soplado' || codigo === 'soplado';
+}
+
 export function CargaDiariaPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
@@ -122,8 +128,12 @@ export function CargaDiariaPage() {
     () => catalogoMateriales.find((item) => item.codigo === material),
     [catalogoMateriales, material]
   );
+  const codigoSoplado = useMemo(
+    () => catalogoMateriales.find(esMaterialSoplado)?.codigo ?? '',
+    [catalogoMateriales]
+  );
   const materialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
-    if (item.codigo === 'Soplado') return false;
+    if (esMaterialSoplado(item)) return false;
     if (etapaActual === 'lavado') return item.requiere_lavado;
     if (etapaActual === 'aglutinado') return item.requiere_aglutinado;
     return true;
@@ -168,6 +178,10 @@ export function CargaDiariaPage() {
       setErrorMessage(`Asigna un empleado al proceso ${procesoPareado || etapaPareada || 'complementario'} antes de registrar.`);
       return;
     }
+    if (requiereRegistroPareado && !ajusteSopladoRegistrado && !codigoSoplado) {
+      setErrorMessage('No se encontró el material interno Soplado. Aplica la migración antes de registrar.');
+      return;
+    }
     const peso = Number(valor);
     if (!Number.isFinite(peso) || peso <= 0) {
       setErrorMessage('Ingresa un peso mayor que cero.');
@@ -198,8 +212,8 @@ export function CargaDiariaPage() {
 
     if (requiereRegistroPareado && !ajusteSopladoRegistrado) {
       entries.push(
-        { ...newEntry, material: 'Soplado', material_referencia: material, peso_kg: -cantidadSoplado, es_ajuste_soplado: true },
-        { ...newEntry, empleado_id: empleadoPareadoId, proceso: procesoPareado, material: 'Soplado', material_referencia: material, peso_kg: -cantidadSoplado, es_ajuste_soplado: true }
+        { ...newEntry, material: codigoSoplado, material_referencia: material, peso_kg: -cantidadSoplado, es_ajuste_soplado: true },
+        { ...newEntry, empleado_id: empleadoPareadoId, proceso: procesoPareado, material: codigoSoplado, material_referencia: material, peso_kg: -cantidadSoplado, es_ajuste_soplado: true }
       );
     }
 
