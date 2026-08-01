@@ -8,6 +8,10 @@ export function getSavedPrinter() {
   return window.localStorage.getItem(PRINTER_STORAGE_KEY) ?? '';
 }
 
+export function saveQzPrinter(printer: string) {
+  window.localStorage.setItem(PRINTER_STORAGE_KEY, printer);
+}
+
 async function ensureConnected() {
   if (qz.websocket.isActive()) return;
   try {
@@ -17,22 +21,14 @@ async function ensureConnected() {
   }
 }
 
-export async function chooseQzPrinter() {
+export async function getQzPrinters() {
   await ensureConnected();
   const result = await qz.printers.find();
   const printers = Array.isArray(result) ? result : [result];
   if (!printers.length) throw new Error('QZ Tray no encontró impresoras instaladas.');
 
-  const saved = getSavedPrinter();
-  const defaultPrinter = saved && printers.includes(saved) ? saved : await qz.printers.getDefault().catch(() => printers[0]);
-  const options = printers.map((printer, index) => `${index + 1}. ${printer}`).join('\n');
-  const defaultIndex = Math.max(0, printers.indexOf(defaultPrinter));
-  const answer = window.prompt(`Selecciona la impresora térmica:\n\n${options}`, String(defaultIndex + 1));
-  if (answer === null) return null;
-  const selected = printers[Number(answer) - 1];
-  if (!selected) throw new Error('La opción de impresora no es válida.');
-  window.localStorage.setItem(PRINTER_STORAGE_KEY, selected);
-  return selected;
+  const defaultPrinter = await qz.printers.getDefault().catch(() => printers[0]);
+  return { printers, defaultPrinter };
 }
 
 async function resolvePrinter() {

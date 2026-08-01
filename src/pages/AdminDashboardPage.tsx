@@ -7,8 +7,10 @@ import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
 import { Toast } from '../components/ui/Toast';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { PrinterDialog } from '../components/ui/PrinterDialog';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
-import { chooseQzPrinter, EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
+import { EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
@@ -136,6 +138,13 @@ export function AdminDashboardPage() {
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [qzPrinterName, setQzPrinterName] = useState(() => getSavedPrinter());
   const [printingEmployeeId, setPrintingEmployeeId] = useState('');
+  const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | {
+    title: string;
+    description: string;
+    run: () => Promise<void>;
+  }>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [nuevoProcesoNombre, setNuevoProcesoNombre] = useState('');
   const [procesoEditValues, setProcesoEditValues] = useState<Record<string, string>>({});
   const [nuevoMaterialCodigo, setNuevoMaterialCodigo] = useState('');
@@ -172,6 +181,17 @@ export function AdminDashboardPage() {
 
   function notify(type: 'success' | 'error', message: string) {
     setNotification({ type, message });
+  }
+
+  async function executeConfirmedAction() {
+    if (!confirmAction || confirmBusy) return;
+    setConfirmBusy(true);
+    try {
+      await confirmAction.run();
+      setConfirmAction(null);
+    } finally {
+      setConfirmBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -676,18 +696,6 @@ export function AdminDashboardPage() {
       .map((item) => `${item.proceso} ${materialDisplayNames[item.material]} ${item.peso_kg?.toFixed(0) ?? 0} kg`);
   }
 
-  async function configurarImpresoraTermica() {
-    try {
-      const selected = await chooseQzPrinter();
-      if (selected) {
-        setQzPrinterName(selected);
-        notify('success', `Impresora térmica seleccionada: ${selected}`);
-      }
-    } catch (error) {
-      notify('error', error instanceof Error ? error.message : 'No se pudo configurar QZ Tray.');
-    }
-  }
-
   async function imprimirComprobanteNativo(empleado: Empleado) {
     if (printingEmployeeId) return;
     setPrintingEmployeeId(empleado.id);
@@ -951,8 +959,6 @@ export function AdminDashboardPage() {
   }
 
   async function handleEliminarRegistroDiario(id: string) {
-    if (!window.confirm('¿Eliminar este registro de kilos? Esta acción no se puede deshacer.')) return;
-
     setLoadingAction(true);
     const { error } = await supabase.from('registros_diarios').delete().eq('id', id);
     if (!error) {
@@ -1042,8 +1048,6 @@ export function AdminDashboardPage() {
   }
 
   async function handleEliminarEmpleado(id: string) {
-    if (!window.confirm('¿Eliminar este empleado y todos sus registros asociados?')) return;
-
     const { error } = await supabase.from('empleados').delete().eq('id', id);
     if (!error) {
       setEmpleados((current) => current.filter((item) => item.id !== id));
@@ -1115,7 +1119,6 @@ export function AdminDashboardPage() {
   }
 
   async function handleEliminarProceso(nombre: string) {
-    if (!window.confirm(`¿Eliminar el proceso "${nombre}"?`)) return;
     const { error } = await supabase.from('procesos').delete().eq('nombre', nombre);
     if (!error) {
       setCatalogoProcesos((current) => current.filter((item) => item.nombre !== nombre));
@@ -1189,7 +1192,6 @@ export function AdminDashboardPage() {
       notify('error', 'Soplado es necesario para los descuentos diarios y no se puede eliminar.');
       return;
     }
-    if (!window.confirm(`¿Eliminar el material "${materialDisplayNames[codigo] ?? codigo}"?`)) return;
     const { error } = await supabase.from('materiales').delete().eq('codigo', codigo);
     if (!error) {
       setCatalogoMateriales((current) => current.filter((item) => item.codigo !== codigo));
@@ -1295,6 +1297,22 @@ export function AdminDashboardPage() {
             onClose={() => setNotification(null)}
           />
         )}
+        <PrinterDialog
+          open={printerDialogOpen}
+          onClose={() => setPrinterDialogOpen(false)}
+          onSelected={(printer) => {
+            setQzPrinterName(printer);
+            notify('success', `Impresora térmica seleccionada: ${printer}`);
+          }}
+        />
+        <ConfirmDialog
+          open={Boolean(confirmAction)}
+          title={confirmAction?.title ?? ''}
+          description={confirmAction?.description ?? ''}
+          busy={confirmBusy}
+          onCancel={() => !confirmBusy && setConfirmAction(null)}
+          onConfirm={() => void executeConfirmedAction()}
+        />
         <AppHeader
           title="Dashboard de nómina"
           subtitle="Administra tarifas, empleados y revisa el consolidado semanal."
@@ -1405,7 +1423,7 @@ export function AdminDashboardPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleEliminarEmpleado(empleado.id)}
+                          onClick={() => setConfirmAction({ title: 'Eliminar empleado', description: `Se eliminará a ${empleado.nombre} y todos sus registros asociados. Esta acción no se puede deshacer.`, run: () => handleEliminarEmpleado(empleado.id) })}
                           className="rounded-2xl bg-rose-500 px-3 py-2 text-white transition hover:bg-rose-400"
                         >
                           Eliminar
@@ -1490,7 +1508,7 @@ export function AdminDashboardPage() {
                         <button type="button" onClick={() => handleActualizarProceso(proceso.nombre)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
                           Guardar
                         </button>
-                        <button type="button" onClick={() => handleEliminarProceso(proceso.nombre)} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
+                        <button type="button" onClick={() => setConfirmAction({ title: 'Eliminar proceso', description: `Se eliminará el proceso “${proceso.nombre}”. Solo será posible si no está asignado a empleados, tarifas o registros.`, run: () => handleEliminarProceso(proceso.nombre) })} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
                           Eliminar
                         </button>
                       </div>
@@ -1565,7 +1583,7 @@ export function AdminDashboardPage() {
                         <button type="button" onClick={() => handleActualizarMaterial(material)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
                           Guardar
                         </button>
-                        <button type="button" onClick={() => handleEliminarMaterial(material.codigo)} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
+                        <button type="button" onClick={() => setConfirmAction({ title: 'Eliminar material', description: `Se eliminará el material “${materialDisplayNames[material.codigo] ?? material.codigo}”. Solo será posible si no está en uso.`, run: () => handleEliminarMaterial(material.codigo) })} className="rounded-xl bg-rose-500 px-3 py-2 text-sm text-white">
                           Eliminar
                         </button>
                       </div>
@@ -1764,7 +1782,7 @@ export function AdminDashboardPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void configurarImpresoraTermica()}
+                  onClick={() => setPrinterDialogOpen(true)}
                   className="btn-secondary"
                   title={qzPrinterName || 'Seleccionar impresora térmica'}
                 >
@@ -2259,7 +2277,7 @@ export function AdminDashboardPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleEliminarRegistroDiario(registro.id)}
+                            onClick={() => setConfirmAction({ title: 'Eliminar registro de kilos', description: 'Este registro desaparecerá del consolidado, la analítica y el ingreso libre. Esta acción no se puede deshacer.', run: () => handleEliminarRegistroDiario(registro.id) })}
                             disabled={loadingAction}
                             className="rounded-2xl bg-rose-500 px-3 py-2 text-white transition hover:bg-rose-400 disabled:opacity-60"
                           >
