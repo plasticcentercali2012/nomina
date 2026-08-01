@@ -8,6 +8,7 @@ import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
 import { Toast } from '../components/ui/Toast';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
+import { chooseQzPrinter, EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
@@ -55,15 +56,6 @@ function parseCurrencyInput(value: string) {
 function formatCurrencyInput(value: string) {
   const digits = value.replace(/\D/g, '');
   return digits ? new Intl.NumberFormat('es-CO').format(Number(digits)) : '';
-}
-
-function escapeReceiptText(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 function usaResumenTermicoPorDia(proceso: string) {
@@ -142,6 +134,8 @@ export function AdminDashboardPage() {
   const [filtroTarifaProceso, setFiltroTarifaProceso] = useState('');
   const [filtroTarifaMaterial, setFiltroTarifaMaterial] = useState('');
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [qzPrinterName, setQzPrinterName] = useState(() => getSavedPrinter());
+  const [printingEmployeeId, setPrintingEmployeeId] = useState('');
   const [nuevoProcesoNombre, setNuevoProcesoNombre] = useState('');
   const [procesoEditValues, setProcesoEditValues] = useState<Record<string, string>>({});
   const [nuevoMaterialCodigo, setNuevoMaterialCodigo] = useState('');
@@ -682,127 +676,91 @@ export function AdminDashboardPage() {
       .map((item) => `${item.proceso} ${materialDisplayNames[item.material]} ${item.peso_kg?.toFixed(0) ?? 0} kg`);
   }
 
-  function imprimirComprobanteEmpleado(empleado: Empleado) {
-    const registrosEmpleado = registros
-      .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
-      .sort((a, b) => a.fecha.localeCompare(b.fecha));
-    const totalKg = registrosEmpleado.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
-    const subtotalProduccion = registrosEmpleado.reduce(
-      (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)),
-      0
-    );
-    const pagoAdicional = getPagoAdicional(empleado.id);
-    const totalPagar = subtotalProduccion + pagoAdicional;
-    const comprobante = window.open('', '_blank', 'width=420,height=720');
-
-    if (!comprobante) {
-      notify('error', 'El navegador bloqueó la ventana de impresión. Habilita las ventanas emergentes para este sitio.');
-      return;
+  async function configurarImpresoraTermica() {
+    try {
+      const selected = await chooseQzPrinter();
+      if (selected) {
+        setQzPrinterName(selected);
+        notify('success', `Impresora térmica seleccionada: ${selected}`);
+      }
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'No se pudo configurar QZ Tray.');
     }
+  }
 
-    const detalleDias = weekDates.map((fecha, index) => {
-      const items = registrosEmpleado.filter((item) => item.fecha === fecha);
-      const totalDiaKg = items.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
-      const totalDiaPago = items.reduce(
+  async function imprimirComprobanteNativo(empleado: Empleado) {
+    if (printingEmployeeId) return;
+    setPrintingEmployeeId(empleado.id);
+    try {
+      const registrosEmpleado = registros
+        .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+      const totalKg = registrosEmpleado.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
+      const subtotalProduccion = registrosEmpleado.reduce(
         (sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)),
         0
       );
-      const mostrarSoloResumen = items.some((item) => usaResumenTermicoPorDia(item.proceso));
-      const detalle = items.length
-        ? mostrarSoloResumen
-          ? ''
-          : items.map((item) => {
-          const kilos = item.peso_kg ?? 0;
-          const precio = getTarifaRegistro(item);
-          return `<div class="item">
-            <div class="item-name">${escapeReceiptText(item.proceso)} - ${escapeReceiptText(materialDisplayNames[item.material] ?? item.material)}</div>
-            <div class="line"><span>${kilos.toLocaleString('es-CO')} kg x ${formatReceiptCurrency(precio)}</span><strong>${formatReceiptCurrency(kilos * precio)}</strong></div>
-          </div>`;
-          }).join('')
-        : '<div class="empty">Sin registros</div>';
+      const pagoAdicional = getPagoAdicional(empleado.id);
+      const totalPagar = subtotalProduccion + pagoAdicional;
+      const receipt = new EscPosReceipt();
 
-      return `<section class="day">
-        <div class="day-title"><strong>${escapeReceiptText(diasSemana[index])}</strong><span>${escapeReceiptText(formatReceiptDate(fecha))}</span></div>
-        ${detalle}
-        <div class="day-total"><span>Total día: ${totalDiaKg.toLocaleString('es-CO')} kg</span><strong>${formatReceiptCurrency(totalDiaPago)}</strong></div>
-      </section>`;
-    }).join('');
+      receipt
+        .align(1)
+        .bold(true)
+        .line('COMPROBANTE DE PAGO')
+        .bold(false)
+        .wrapped(empleado.nombre)
+        .align(0)
+        .separator()
+        .line(fitColumns('Semana', `${formatReceiptDayMonth(weekDates[0] ?? '')}-${formatReceiptDate(weekDates[weekDates.length - 1] ?? '')}`))
+        .line(fitColumns('Emitido', formatReceiptDateTime(new Date())))
+        .separator();
 
-    comprobante.document.write(`<!doctype html>
-      <html lang="es">
-      <head>
-        <meta charset="utf-8">
-        <title>Comprobante ${escapeReceiptText(empleado.nombre)} - ${escapeReceiptText(semanaInicio)}</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-        <style>
-          /* CONFIGURACION CENTRAL DEL RECIBO TERMICO */
-          :root {
-            --ticket-paper-width: 58mm;
-            --ticket-content-width: 46mm;
-            --ticket-font: "VT323", "Courier New", Consolas, monospace;
-            --ticket-font-size: 20px;
-            --ticket-detail-size: 18px;
-            --ticket-small-size: 16px;
-            --ticket-line-height: 1.05;
-            --ticket-normal-weight: 400;
-            --ticket-bold-weight: 400;
-            --ticket-letter-spacing: 1px;
-          }
-          @page { size: 58mm auto; margin: 0; }
-          * { box-sizing: border-box; }
-          html { width: var(--ticket-paper-width); margin: 0; padding: 0; background: #fff; }
-          body, .texto-recibo { width: var(--ticket-content-width); margin: 0 auto; padding: 1.2mm 0; color: #222; background: #fff; font-family: var(--ticket-font); font-size: var(--ticket-font-size); font-weight: var(--ticket-normal-weight); line-height: var(--ticket-line-height); letter-spacing: var(--ticket-letter-spacing); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          h1 { margin: 0; font-size: 22px; font-weight: var(--ticket-bold-weight); line-height: 1.05; text-align: center; letter-spacing: 1px; }
-          .center { text-align: center; }
-          .meta { margin: 2mm 0 1mm; padding: 1.5mm 0; border-top: .3mm dashed #000; border-bottom: .3mm dashed #000; }
-          .employee { display: block; margin-bottom: .8mm; font-size: var(--ticket-font-size); font-weight: var(--ticket-bold-weight); overflow-wrap: anywhere; }
-          .meta-row, .day-title, .line, .day-total, .total-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 1.5mm; }
-          .meta-row { grid-template-columns: auto minmax(0, 1fr); column-gap: 1mm; margin-top: .5mm; font-size: 14px; line-height: 1.05; letter-spacing: 0; }
-          .meta-row strong { min-width: 0; overflow: hidden; white-space: nowrap; text-align: right; }
-          .day-title span, .line strong, .day-total strong, .total-line strong { white-space: nowrap; text-align: right; }
-          .day { padding: 1.7mm 0; border-bottom: .3mm dashed #000; break-inside: avoid; page-break-inside: avoid; }
-          .day-title { margin-bottom: .8mm; column-gap: .5mm; font-size: var(--ticket-font-size); }
-          .day-title strong, .day-title span { font-weight: var(--ticket-bold-weight); }
-          .item { margin: 1.2mm 0; }
-          .item-name { font-size: var(--ticket-detail-size); font-weight: var(--ticket-normal-weight); letter-spacing: .5px; overflow-wrap: anywhere; }
-          .line { margin-top: .3mm; column-gap: .7mm; font-size: var(--ticket-detail-size); letter-spacing: .5px; }
-          .line span { min-width: 0; overflow-wrap: anywhere; }
-          .empty { color: #555; font-style: italic; }
-          .day-total { margin-top: 1mm; column-gap: .7mm; font-size: var(--ticket-detail-size); font-weight: var(--ticket-bold-weight); }
-          .totals { margin-top: 2mm; }
-          .total-line { margin: .8mm 0; column-gap: .7mm; font-size: var(--ticket-detail-size); }
-          .grand-total { margin-top: 1.5mm; padding: 1.2mm 0; border-top: .4mm solid #000; border-bottom: .4mm solid #000; font-size: var(--ticket-font-size); font-weight: var(--ticket-bold-weight); }
-          .footer { margin: 2.5mm 0 1mm; text-align: center; font-size: var(--ticket-small-size); }
-          @media print { html { width: var(--ticket-paper-width) !important; } body { width: var(--ticket-content-width) !important; } }
-          @media screen { body { margin: 0 auto; box-shadow: 0 0 12px rgba(0,0,0,.15); } }
-        </style>
-      </head>
-      <body class="texto-recibo">
-        <h1>COMPROBANTE DE PAGO</h1>
-        <div class="meta">
-          <strong class="employee">${escapeReceiptText(empleado.nombre)}</strong>
-          <div class="meta-row"><span>Semana</span><strong>${escapeReceiptText(formatReceiptDayMonth(weekDates[0] ?? ''))} - ${escapeReceiptText(formatReceiptDate(weekDates[weekDates.length - 1] ?? ''))}</strong></div>
-          <div class="meta-row"><span>Emitido</span><strong>${escapeReceiptText(formatReceiptDateTime(new Date()))}</strong></div>
-        </div>
-        ${detalleDias}
-        <div class="totals">
-          <div class="total-line"><span>Total kilos</span><strong>${totalKg.toLocaleString('es-CO')} kg</strong></div>
-          <div class="total-line"><span>Producción</span><strong>${formatReceiptCurrency(subtotalProduccion)}</strong></div>
-          <div class="total-line"><span>Pago adicional</span><strong>${formatReceiptCurrency(pagoAdicional)}</strong></div>
-          <div class="total-line grand-total"><span>TOTAL A PAGAR</span><strong>${formatReceiptCurrency(totalPagar)}</strong></div>
-        </div>
-        <div class="footer">Comprobante informativo de nómina</div>
-      </body>
-      </html>`);
-    comprobante.document.close();
-    comprobante.focus();
-    const imprimirCuandoCargueLaFuente = () => window.setTimeout(() => comprobante.print(), 100);
-    if (comprobante.document.fonts?.ready) {
-      void comprobante.document.fonts.ready.then(imprimirCuandoCargueLaFuente, imprimirCuandoCargueLaFuente);
-    } else {
-      window.setTimeout(imprimirCuandoCargueLaFuente, 500);
+      weekDates.forEach((fecha, index) => {
+        const items = registrosEmpleado.filter((item) => item.fecha === fecha);
+        const totalDiaKg = items.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
+        const totalDiaPago = items.reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0);
+        const mostrarSoloResumen = items.some((item) => usaResumenTermicoPorDia(item.proceso));
+
+        receipt.bold(true).line(fitColumns(diasSemana[index], formatReceiptDate(fecha))).bold(false);
+        if (!items.length) {
+          receipt.line('Sin registros');
+        } else if (!mostrarSoloResumen) {
+          items.forEach((item) => {
+            const kilos = item.peso_kg ?? 0;
+            const precio = getTarifaRegistro(item);
+            receipt
+              .wrapped(`${item.proceso} - ${materialDisplayNames[item.material] ?? item.material}`)
+              .line(fitColumns(`${kilos.toLocaleString('es-CO')}kg x ${formatReceiptCurrency(precio)}`, formatReceiptCurrency(kilos * precio)));
+          });
+        }
+        receipt
+          .bold(true)
+          .line(fitColumns(`Total día: ${totalDiaKg.toLocaleString('es-CO')}kg`, formatReceiptCurrency(totalDiaPago)))
+          .bold(false)
+          .separator();
+      });
+
+      receipt
+        .line(fitColumns('Total kilos', `${totalKg.toLocaleString('es-CO')} kg`))
+        .line(fitColumns('Producción', formatReceiptCurrency(subtotalProduccion)))
+        .line(fitColumns('Pago adicional', formatReceiptCurrency(pagoAdicional)))
+        .separator('=')
+        .bold(true)
+        .line(fitColumns('TOTAL A PAGAR', formatReceiptCurrency(totalPagar)))
+        .separator('=')
+        .bold(false)
+        .align(1)
+        .line('Comprobante informativo')
+        .line('de nómina');
+
+      const printer = await printEscPos(receipt.finish(), `Nómina - ${empleado.nombre}`);
+      setQzPrinterName(printer);
+      notify('success', `Comprobante enviado a ${printer}.`);
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'No se pudo imprimir el comprobante.');
+    } finally {
+      setPrintingEmployeeId('');
     }
   }
 
@@ -1804,6 +1762,15 @@ export function AdminDashboardPage() {
                 >
                   Exportar CSV semanal
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void configurarImpresoraTermica()}
+                  className="btn-secondary"
+                  title={qzPrinterName || 'Seleccionar impresora térmica'}
+                >
+                  <Icon name="printer" className="h-4 w-4" />
+                  {qzPrinterName ? 'Cambiar impresora' : 'Configurar impresora'}
+                </button>
               </div>
             </div>
             </div>
@@ -1855,12 +1822,15 @@ export function AdminDashboardPage() {
                       <td className="px-4 py-3 text-center">
                         <button
                           type="button"
-                          onClick={() => imprimirComprobanteEmpleado(empleado)}
+                          onClick={() => void imprimirComprobanteNativo(empleado)}
+                          disabled={Boolean(printingEmployeeId)}
                           className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 transition hover:border-sky-400/60 hover:bg-sky-500/20 hover:text-sky-200"
                           title={`Imprimir comprobante de ${empleado.nombre}`}
                           aria-label={`Imprimir comprobante de ${empleado.nombre}`}
                         >
-                          <Icon name="printer" className="h-5 w-5" />
+                          {printingEmployeeId === empleado.id
+                            ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-300/30 border-t-sky-300" />
+                            : <Icon name="printer" className="h-5 w-5" />}
                         </button>
                       </td>
                     </tr>

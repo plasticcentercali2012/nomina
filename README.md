@@ -47,6 +47,17 @@ La migración `supabase/migrations/20260731120000_flujo_materiales_encadenado.sq
 
 La migración `supabase/migrations/20260731150000_ajuste_soplado_diario.sql` crea el ajuste único de soplado por fecha y proceso, junto con el permiso para que el encargado lo corrija únicamente durante la jornada actual.
 
+## Impresión térmica ESC/POS
+
+Los comprobantes se envían como comandos ESC/POS nativos mediante QZ Tray; no utilizan PDF ni la impresión HTML del navegador. En el computador conectado a la impresora:
+
+1. Instala y abre QZ Tray 2.2 o superior desde `https://qz.io/download/`.
+2. Abre Consolidado y pulsa **Configurar impresora**.
+3. Selecciona la impresora térmica instalada en Windows.
+4. En la primera conexión, autoriza el acceso solicitado por QZ Tray y marca la opción para recordar la decisión.
+
+La selección queda guardada localmente en ese navegador. El recibo usa Font A, 32 columnas y codificación CP850 para español.
+
 ## Despliegue
 
 Se recomienda Vercel o Netlify en su plan gratuito:
