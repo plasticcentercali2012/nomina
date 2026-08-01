@@ -1,8 +1,53 @@
 import * as qz from 'qz-tray';
+import { supabase } from './supabaseClient';
 
 const PRINTER_STORAGE_KEY = 'nomina:qz-printer';
 const ESC = '\x1B';
 const GS = '\x1D';
+let qzSecurityConfigured = false;
+
+function configureQzSecurity() {
+  if (qzSecurityConfigured) return;
+
+  qz.security.setCertificatePromise((resolve, reject) => {
+    const certificateUrl = `${import.meta.env.BASE_URL}qz/digital-certificate.txt`;
+
+    fetch(certificateUrl, { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`No se pudo cargar el certificado QZ (${response.status}).`);
+        }
+
+        const certificate = await response.text();
+        if (!certificate.includes('-----BEGIN CERTIFICATE-----')) {
+          throw new Error('El archivo digital-certificate.txt no contiene un certificado válido.');
+        }
+
+        resolve(certificate);
+      })
+      .catch(reject);
+  });
+
+  qz.security.setSignatureAlgorithm('SHA512');
+  qz.security.setSignaturePromise(async (requestToSign) => {
+    const { data, error } = await supabase.functions.invoke('qz-sign', {
+      body: { request: requestToSign }
+    });
+
+    if (error) {
+      throw new Error(`La función qz-sign rechazó la solicitud: ${error.message}`);
+    }
+
+    if (!data || typeof data.signature !== 'string' || !data.signature) {
+      const detail = data && typeof data.error === 'string' ? ` ${data.error}` : '';
+      throw new Error(`La función qz-sign no devolvió una firma válida.${detail}`);
+    }
+
+    return data.signature;
+  });
+
+  qzSecurityConfigured = true;
+}
 
 export function getSavedPrinter() {
   return window.localStorage.getItem(PRINTER_STORAGE_KEY) ?? '';
@@ -13,6 +58,7 @@ export function saveQzPrinter(printer: string) {
 }
 
 async function ensureConnected() {
+  configureQzSecurity();
   if (qz.websocket.isActive()) return;
   try {
     await qz.websocket.connect({ retries: 3, delay: 1 });
