@@ -26,6 +26,28 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
 }
 
+function formatReceiptCurrency(value: number) {
+  return `$ ${Math.round(value).toLocaleString('es-CO')}`;
+}
+
+function formatReceiptDate(value: string) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    .format(parseLocalDate(value));
+}
+
+function formatReceiptDayMonth(value: string) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: '2-digit' })
+    .format(parseLocalDate(value));
+}
+
+function formatReceiptDateTime(date: Date) {
+  const fecha = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' }).format(date);
+  const hora = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+  return `${fecha} ${hora}`;
+}
+
 function parseCurrencyInput(value: string) {
   return Number(value.replace(/\D/g, '')) || 0;
 }
@@ -693,16 +715,16 @@ export function AdminDashboardPage() {
           const kilos = item.peso_kg ?? 0;
           const precio = getTarifaRegistro(item);
           return `<div class="item">
-            <div>${escapeReceiptText(item.proceso)} · ${escapeReceiptText(materialDisplayNames[item.material] ?? item.material)}</div>
-            <div class="line"><span>${kilos.toLocaleString('es-CO')} kg × ${formatCurrency(precio)}</span><strong>${formatCurrency(kilos * precio)}</strong></div>
+            <div class="item-name">${escapeReceiptText(item.proceso)} - ${escapeReceiptText(materialDisplayNames[item.material] ?? item.material)}</div>
+            <div class="line"><span>${kilos.toLocaleString('es-CO')} kg x ${formatReceiptCurrency(precio)}</span><strong>${formatReceiptCurrency(kilos * precio)}</strong></div>
           </div>`;
           }).join('')
         : '<div class="empty">Sin registros</div>';
 
       return `<section class="day">
-        <div class="day-title"><strong>${escapeReceiptText(diasSemana[index])}</strong><span>${escapeReceiptText(fecha)}</span></div>
+        <div class="day-title"><strong>${escapeReceiptText(diasSemana[index])}</strong><span>${escapeReceiptText(formatReceiptDate(fecha))}</span></div>
         ${detalle}
-        <div class="day-total"><span>Total día: ${totalDiaKg.toLocaleString('es-CO')} kg</span><strong>${formatCurrency(totalDiaPago)}</strong></div>
+        <div class="day-total"><span>Total día: ${totalDiaKg.toLocaleString('es-CO')} kg</span><strong>${formatReceiptCurrency(totalDiaPago)}</strong></div>
       </section>`;
     }).join('');
 
@@ -711,48 +733,77 @@ export function AdminDashboardPage() {
       <head>
         <meta charset="utf-8">
         <title>Comprobante ${escapeReceiptText(empleado.nombre)} - ${escapeReceiptText(semanaInicio)}</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
         <style>
-          @page { size: 58mm auto; margin: 2mm; }
+          /* CONFIGURACION CENTRAL DEL RECIBO TERMICO */
+          :root {
+            --ticket-paper-width: 58mm;
+            --ticket-content-width: 46mm;
+            --ticket-font: "VT323", "Courier New", Consolas, monospace;
+            --ticket-font-size: 20px;
+            --ticket-detail-size: 18px;
+            --ticket-small-size: 16px;
+            --ticket-line-height: 1.05;
+            --ticket-normal-weight: 400;
+            --ticket-bold-weight: 400;
+            --ticket-letter-spacing: 1px;
+          }
+          @page { size: 58mm auto; margin: 0; }
           * { box-sizing: border-box; }
-          body { width: 54mm; margin: 0 auto; color: #000; background: #fff; font: 10px/1.35 ui-monospace, "Courier New", monospace; }
-          h1 { margin: 0; font-size: 14px; text-align: center; }
+          html { width: var(--ticket-paper-width); margin: 0; padding: 0; background: #fff; }
+          body, .texto-recibo { width: var(--ticket-content-width); margin: 0 auto; padding: 1.2mm 0; color: #222; background: #fff; font-family: var(--ticket-font); font-size: var(--ticket-font-size); font-weight: var(--ticket-normal-weight); line-height: var(--ticket-line-height); letter-spacing: var(--ticket-letter-spacing); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          h1 { margin: 0; font-size: 22px; font-weight: var(--ticket-bold-weight); line-height: 1.05; text-align: center; letter-spacing: 1px; }
           .center { text-align: center; }
-          .meta { margin: 3mm 0; padding: 2mm 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
-          .meta strong { display: block; font-size: 11px; }
-          .day { padding: 2mm 0; border-bottom: 1px dashed #000; break-inside: avoid; }
-          .day-title, .line, .day-total, .total-line { display: flex; justify-content: space-between; gap: 2mm; }
-          .day-title { margin-bottom: 1mm; }
-          .item { margin: 1.5mm 0; }
-          .line { font-size: 9px; }
+          .meta { margin: 2mm 0 1mm; padding: 1.5mm 0; border-top: .3mm dashed #000; border-bottom: .3mm dashed #000; }
+          .employee { display: block; margin-bottom: .8mm; font-size: var(--ticket-font-size); font-weight: var(--ticket-bold-weight); overflow-wrap: anywhere; }
+          .meta-row, .day-title, .line, .day-total, .total-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 1.5mm; }
+          .meta-row { grid-template-columns: auto minmax(0, 1fr); column-gap: 1mm; margin-top: .5mm; font-size: 14px; line-height: 1.05; letter-spacing: 0; }
+          .meta-row strong { min-width: 0; overflow: hidden; white-space: nowrap; text-align: right; }
+          .day-title span, .line strong, .day-total strong, .total-line strong { white-space: nowrap; text-align: right; }
+          .day { padding: 1.7mm 0; border-bottom: .3mm dashed #000; break-inside: avoid; page-break-inside: avoid; }
+          .day-title { margin-bottom: .8mm; column-gap: .5mm; font-size: var(--ticket-font-size); }
+          .day-title strong, .day-title span { font-weight: var(--ticket-bold-weight); }
+          .item { margin: 1.2mm 0; }
+          .item-name { font-size: var(--ticket-detail-size); font-weight: var(--ticket-normal-weight); letter-spacing: .5px; overflow-wrap: anywhere; }
+          .line { margin-top: .3mm; column-gap: .7mm; font-size: var(--ticket-detail-size); letter-spacing: .5px; }
+          .line span { min-width: 0; overflow-wrap: anywhere; }
           .empty { color: #555; font-style: italic; }
-          .day-total { margin-top: 1.5mm; font-weight: 700; }
-          .totals { margin-top: 3mm; }
-          .total-line { margin: 1mm 0; }
-          .grand-total { margin-top: 2mm; padding: 2mm 0; border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 13px; font-weight: 700; }
-          .footer { margin: 4mm 0 2mm; text-align: center; font-size: 9px; }
-          @media screen { body { padding: 3mm 0; } }
+          .day-total { margin-top: 1mm; column-gap: .7mm; font-size: var(--ticket-detail-size); font-weight: var(--ticket-bold-weight); }
+          .totals { margin-top: 2mm; }
+          .total-line { margin: .8mm 0; column-gap: .7mm; font-size: var(--ticket-detail-size); }
+          .grand-total { margin-top: 1.5mm; padding: 1.2mm 0; border-top: .4mm solid #000; border-bottom: .4mm solid #000; font-size: var(--ticket-font-size); font-weight: var(--ticket-bold-weight); }
+          .footer { margin: 2.5mm 0 1mm; text-align: center; font-size: var(--ticket-small-size); }
+          @media print { html { width: var(--ticket-paper-width) !important; } body { width: var(--ticket-content-width) !important; } }
+          @media screen { body { margin: 0 auto; box-shadow: 0 0 12px rgba(0,0,0,.15); } }
         </style>
       </head>
-      <body>
+      <body class="texto-recibo">
         <h1>COMPROBANTE DE PAGO</h1>
         <div class="meta">
-          <strong>${escapeReceiptText(empleado.nombre)}</strong>
-          <div>Semana: ${escapeReceiptText(weekDates[0] ?? '')} al ${escapeReceiptText(weekDates[weekDates.length - 1] ?? '')}</div>
-          <div>Emitido: ${escapeReceiptText(new Date().toLocaleString('es-CO'))}</div>
+          <strong class="employee">${escapeReceiptText(empleado.nombre)}</strong>
+          <div class="meta-row"><span>Semana</span><strong>${escapeReceiptText(formatReceiptDayMonth(weekDates[0] ?? ''))} - ${escapeReceiptText(formatReceiptDate(weekDates[weekDates.length - 1] ?? ''))}</strong></div>
+          <div class="meta-row"><span>Emitido</span><strong>${escapeReceiptText(formatReceiptDateTime(new Date()))}</strong></div>
         </div>
         ${detalleDias}
         <div class="totals">
           <div class="total-line"><span>Total kilos</span><strong>${totalKg.toLocaleString('es-CO')} kg</strong></div>
-          <div class="total-line"><span>Producción</span><strong>${formatCurrency(subtotalProduccion)}</strong></div>
-          <div class="total-line"><span>Pago adicional</span><strong>${formatCurrency(pagoAdicional)}</strong></div>
-          <div class="total-line grand-total"><span>TOTAL A PAGAR</span><strong>${formatCurrency(totalPagar)}</strong></div>
+          <div class="total-line"><span>Producción</span><strong>${formatReceiptCurrency(subtotalProduccion)}</strong></div>
+          <div class="total-line"><span>Pago adicional</span><strong>${formatReceiptCurrency(pagoAdicional)}</strong></div>
+          <div class="total-line grand-total"><span>TOTAL A PAGAR</span><strong>${formatReceiptCurrency(totalPagar)}</strong></div>
         </div>
         <div class="footer">Comprobante informativo de nómina</div>
       </body>
       </html>`);
     comprobante.document.close();
     comprobante.focus();
-    window.setTimeout(() => comprobante.print(), 250);
+    const imprimirCuandoCargueLaFuente = () => window.setTimeout(() => comprobante.print(), 100);
+    if (comprobante.document.fonts?.ready) {
+      void comprobante.document.fonts.ready.then(imprimirCuandoCargueLaFuente, imprimirCuandoCargueLaFuente);
+    } else {
+      window.setTimeout(imprimirCuandoCargueLaFuente, 500);
+    }
   }
 
   async function handleActualizarTarifa(id: string, precioUnificado: number) {
