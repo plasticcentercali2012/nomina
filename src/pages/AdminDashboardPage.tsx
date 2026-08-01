@@ -13,6 +13,7 @@ import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 import { EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
+const diasSemanaRecibo = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'] as const;
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
   empleado_procesos?: Array<{ proceso: Proceso }>;
 };
@@ -730,7 +731,7 @@ export function AdminDashboardPage() {
         const totalDiaPago = items.reduce((sum, item) => sum + ((item.peso_kg ?? 0) * getTarifaRegistro(item)), 0);
         const mostrarSoloResumen = items.some((item) => usaResumenTermicoPorDia(item.proceso));
 
-        receipt.bold(true).line(fitColumns(diasSemana[index], formatReceiptDate(fecha))).bold(false);
+        receipt.bold(true).line(fitColumns(diasSemanaRecibo[index], formatReceiptDate(fecha))).bold(false);
         if (!items.length) {
           receipt.line('Sin registros');
         } else if (!mostrarSoloResumen) {
