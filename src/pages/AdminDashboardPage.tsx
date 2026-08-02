@@ -81,6 +81,11 @@ function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
   return null;
 }
 
+function esProcesoPicado(proceso: string) {
+  const normalizado = proceso.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  return normalizado.startsWith('picad');
+}
+
 function esEmpleadoDePlanta(empleado: Empleado) {
   const procesosEmpleado = empleado.procesos_asignados.length
     ? empleado.procesos_asignados
@@ -359,6 +364,13 @@ export function AdminDashboardPage() {
       fin = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12);
     }
     return { inicio: formatLocalDate(inicio), fin: formatLocalDate(fin) };
+  }, [fechaAnalitica, periodoAnalitica]);
+
+  useEffect(() => {
+    setFiltroDetalleFecha('');
+    setFiltroDetalleEmpleado('');
+    setFiltroDetalleProceso('');
+    setFiltroDetalleMaterial('');
   }, [fechaAnalitica, periodoAnalitica]);
 
   useEffect(() => {
@@ -662,24 +674,6 @@ export function AdminDashboardPage() {
     setLoadingAction(false);
   }
 
-  const estadisticas = useMemo(() => {
-    const registrosFinales = registrosAnalitica.filter(
-      (registro) => etapaDelProceso(registro.proceso) === 'aglutinado'
-    );
-    return {
-      procesos: registrosAnalitica.reduce<Record<string, number>>((acc, registro) => {
-        acc[registro.proceso] = (acc[registro.proceso] ?? 0) + (registro.peso_kg ?? 0);
-        return acc;
-      }, {}),
-      materiales: registrosFinales.reduce<Record<string, number>>((acc, registro) => {
-        acc[registro.material] = (acc[registro.material] ?? 0) + (registro.peso_kg ?? 0);
-        return acc;
-      }, {}),
-      totalFinalKg: registrosFinales.reduce((total, registro) => total + (registro.peso_kg ?? 0), 0),
-      totalEmpleadosPeriodo: new Set(registrosAnalitica.map((registro) => registro.empleado_id)).size
-    };
-  }, [registrosAnalitica]);
-
   const registrosAnaliticaFiltrados = useMemo(
     () => registrosAnalitica.filter((registro) =>
       (!filtroDetalleFecha || registro.fecha === filtroDetalleFecha)
@@ -696,12 +690,36 @@ export function AdminDashboardPage() {
     ]
   );
 
+  const estadisticas = useMemo(() => {
+    const registrosPicado = registrosAnaliticaFiltrados.filter((registro) => esProcesoPicado(registro.proceso));
+    const registrosAglutinado = registrosAnaliticaFiltrados.filter((registro) => etapaDelProceso(registro.proceso) === 'aglutinado');
+    const registrosParaSumatorias = filtroDetalleProceso ? registrosAnaliticaFiltrados : registrosAglutinado;
+    return {
+      procesos: registrosAnaliticaFiltrados.reduce<Record<string, number>>((acc, registro) => {
+        acc[registro.proceso] = (acc[registro.proceso] ?? 0) + (registro.peso_kg ?? 0);
+        return acc;
+      }, {}),
+      materialesPicado: registrosPicado.reduce<Record<string, number>>((acc, registro) => {
+        acc[registro.material] = (acc[registro.material] ?? 0) + (registro.peso_kg ?? 0);
+        return acc;
+      }, {}),
+      materialesAglutinado: registrosAglutinado.reduce<Record<string, number>>((acc, registro) => {
+        acc[registro.material] = (acc[registro.material] ?? 0) + (registro.peso_kg ?? 0);
+        return acc;
+      }, {}),
+      totalFinalKg: registrosParaSumatorias.reduce((total, registro) => total + (registro.peso_kg ?? 0), 0),
+      totalEmpleadosPeriodo: new Set(registrosAnaliticaFiltrados.map((registro) => registro.empleado_id)).size,
+      totalSalidasFinales: registrosAnaliticaFiltrados.filter((registro) => etapaDelProceso(registro.proceso) === 'aglutinado').length
+    };
+  }, [filtroDetalleProceso, registrosAnaliticaFiltrados]);
+
   const totalDetalleAnalitica = useMemo(() => {
     const registrosParaTotal = filtroDetalleProceso
       ? registrosAnaliticaFiltrados
       : registrosAnaliticaFiltrados.filter((registro) => etapaDelProceso(registro.proceso) === 'aglutinado');
     return registrosParaTotal.reduce((total, registro) => total + (registro.peso_kg ?? 0), 0);
   }, [filtroDetalleProceso, registrosAnaliticaFiltrados]);
+  const cantidadFiltrosAnalitica = [filtroDetalleFecha, filtroDetalleEmpleado, filtroDetalleProceso, filtroDetalleMaterial].filter(Boolean).length;
 
   const cierresHistoricosVisibles = useMemo(
     () => filtroCierreNominaId === 'all'
@@ -2641,6 +2659,7 @@ export function AdminDashboardPage() {
                 {rangoAnalitica.inicio === rangoAnalitica.fin ? rangoAnalitica.inicio : `${rangoAnalitica.inicio} — ${rangoAnalitica.fin}`}
               </span>
               <span>{registrosAnalitica.length} registros encontrados</span>
+              {cantidadFiltrosAnalitica > 0 && <><span className="badge-warning">{cantidadFiltrosAnalitica} {cantidadFiltrosAnalitica === 1 ? 'filtro activo' : 'filtros activos'}</span><button type="button" className="border-0 bg-transparent font-semibold text-indigo-300 hover:text-indigo-200" onClick={limpiarFiltrosDetalle}>Quitar filtros</button></>}
             </div>
           </div>
           <div className="card overflow-hidden">
@@ -2700,7 +2719,7 @@ export function AdminDashboardPage() {
             <div className="card grid min-h-64 place-items-center"><div className="text-center"><span className="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-indigo-400/20 border-t-indigo-400" /><p className="mt-3 text-sm text-slate-500">Consultando producción…</p></div></div>
           ) : (
           <>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
             <h3 className="text-xl font-semibold">Volumen por proceso</h3>
             <div className="mt-4 space-y-3 text-slate-300">
@@ -2713,13 +2732,26 @@ export function AdminDashboardPage() {
             </div>
           </div>
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
-            <h3 className="text-xl font-semibold">Volumen por material</h3>
+            <h3 className="text-xl font-semibold">Volumen por material picado</h3>
+            <p className="mt-1 text-xs text-slate-500">Materia picada disponible para programar los siguientes turnos.</p>
+            <div className="mt-4 space-y-3 text-slate-300">
+              {materiales.map((material) => (
+                <div key={material} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-3">
+                  <span>{materialDisplayNames[material]}</span>
+                  <span className="font-semibold text-violet-300">{(estadisticas.materialesPicado[material] ?? 0).toFixed(0)} kg</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-lg shadow-slate-950/20">
+            <h3 className="text-xl font-semibold">Volumen por material aglutinado</h3>
+            <p className="mt-1 text-xs text-slate-500">Salida final neta por material, incluyendo el descuento de soplado.</p>
             <div className="mt-4 space-y-3 text-slate-300">
               {materiales.map((material) => (
                 <div key={material} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-3">
                   <span>{materialDisplayNames[material]}</span>
                   {(() => {
-                    const valor = estadisticas.materiales[material] ?? 0;
+                    const valor = estadisticas.materialesAglutinado[material] ?? 0;
                     const materialCatalogo = catalogoMateriales.find((item) => item.codigo === material);
                     const soplado = Boolean(materialCatalogo && esMaterialSoplado(materialCatalogo));
                     return <span className={`font-semibold ${soplado ? 'text-rose-300' : 'text-sky-300'}`}>{soplado ? `${Math.abs(valor).toFixed(0)} kg descuento` : `${valor.toFixed(0)} kg`}</span>;
@@ -2738,13 +2770,14 @@ export function AdminDashboardPage() {
                 <p className="mt-1 text-xs text-slate-500">Empleados con registros en el periodo.</p>
               </div>
               <div className="rounded-3xl bg-slate-950/70 px-4 py-3">
-                <p>Total registros</p>
-                <p className="text-3xl font-semibold text-sky-300">{registrosAnalitica.length}</p>
+                <p>Movimientos filtrados</p>
+                <p className="text-3xl font-semibold text-sky-300">{registrosAnaliticaFiltrados.length}</p>
+                <p className="mt-1 text-xs text-slate-500">{estadisticas.totalSalidasFinales} corresponden al proceso final Aglutinado.</p>
               </div>
               <div className="rounded-3xl bg-slate-950/70 px-4 py-3">
                 <p>Total kg del periodo</p>
                 <p className="text-3xl font-semibold text-sky-300">{estadisticas.totalFinalKg.toLocaleString('es-CO')} kg</p>
-                <p className="mt-1 text-xs text-slate-500">Producción neta del proceso final Aglutinado.</p>
+                <p className="mt-1 text-xs text-slate-500">{filtroDetalleProceso ? `Suma del proceso filtrado: ${filtroDetalleProceso}.` : 'Producción neta del proceso final Aglutinado.'}</p>
               </div>
             </div>
           </div>
@@ -2791,7 +2824,7 @@ export function AdminDashboardPage() {
                 <button type="button" className="btn-secondary h-12 rounded-2xl px-5" onClick={limpiarFiltrosDetalle}>Limpiar</button>
               </div>
               <p className="mt-3 text-xs text-slate-500">
-                {registrosAnaliticaFiltrados.length} de {registrosAnalitica.length} registros · Usa los filtros individualmente o combínalos.
+                {registrosAnaliticaFiltrados.length} de {registrosAnalitica.length} movimientos · {estadisticas.totalSalidasFinales} salidas finales de Aglutinado. Cada fila representa un registro real en Supabase.
               </p>
             </div>
             {registrosAnaliticaFiltrados.length === 0 ? (
