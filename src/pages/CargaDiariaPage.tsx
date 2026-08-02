@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
 import { Toast } from '../components/ui/Toast';
+import { empleadoSoloLavador, empleadoTieneEtapa, etapaDelProceso, procesosPrincipalesEmpleado } from '../lib/productionFlow';
 
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
   empleado_procesos?: Array<{ proceso: Proceso }>;
@@ -19,13 +20,6 @@ function normalizeEmpleado(row: EmpleadoRow): Empleado {
     ...row,
     procesos_asignados: asignados.length ? asignados : [row.proceso_habitual]
   };
-}
-
-function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
-  const normalizado = proceso.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-  if (normalizado.startsWith('lav')) return 'lavado';
-  if (normalizado.startsWith('aglut')) return 'aglutinado';
-  return null;
 }
 
 function esMaterialSoplado(material: CatalogoMaterial) {
@@ -66,9 +60,11 @@ export function CargaDiariaPage() {
         if (data) {
           const empleadosData = (data as EmpleadoRow[]).map(normalizeEmpleado);
           setEmpleados(empleadosData);
-          const firstId = empleadosData[0]?.id ?? '';
-          setEmpleadoId(firstId);
-          setProceso(empleadosData[0]?.procesos_asignados[0] ?? 'Picador');
+          const primeroSeleccionable = empleadosData.find((empleado) => !empleadoSoloLavador(empleado));
+          setEmpleadoId(primeroSeleccionable?.id ?? '');
+          const procesosPrincipales = primeroSeleccionable ? procesosPrincipalesEmpleado(primeroSeleccionable) : [];
+          const procesoAglutinado = procesosPrincipales.find((item) => etapaDelProceso(item) === 'aglutinado');
+          setProceso(procesoAglutinado ?? procesosPrincipales[0] ?? 'Picador');
         }
       });
   }, []);
@@ -77,7 +73,10 @@ export function CargaDiariaPage() {
     if (!empleadoId || !fecha) return;
     const empleado = empleados.find((item) => item.id === empleadoId);
     if (empleado) {
-      setProceso(empleado.procesos_asignados[0] ?? empleado.proceso_habitual);
+      const principales = procesosPrincipalesEmpleado(empleado);
+      const aglutinado = principales.find((item) => etapaDelProceso(item) === 'aglutinado');
+      const tieneAmbos = empleadoTieneEtapa(empleado, 'lavado') && empleadoTieneEtapa(empleado, 'aglutinado');
+      setProceso((actual) => tieneAmbos && aglutinado ? aglutinado : principales.includes(actual) ? actual : principales[0] ?? empleado.proceso_habitual);
     }
     supabase
       .from('registros_diarios')
@@ -119,7 +118,10 @@ export function CargaDiariaPage() {
   );
 
   const procesosDisponibles = useMemo(
-    () => empleados.find((item) => item.id === empleadoId)?.procesos_asignados ?? procesos,
+    () => {
+      const empleado = empleados.find((item) => item.id === empleadoId);
+      return empleado ? procesosPrincipalesEmpleado(empleado) : procesos.filter((item) => etapaDelProceso(item) !== 'lavado');
+    },
     [empleadoId, empleados, procesos]
   );
 
@@ -149,8 +151,8 @@ export function CargaDiariaPage() {
     [catalogoProcesos, etapaPareada]
   );
   const empleadosPareados = useMemo(
-    () => empleados.filter((empleado) => empleado.id !== empleadoId && empleado.procesos_asignados.includes(procesoPareado)),
-    [empleadoId, empleados, procesoPareado]
+    () => empleados.filter((empleado) => empleado.id !== empleadoId && empleadoTieneEtapa(empleado, 'lavado')),
+    [empleadoId, empleados]
   );
   const ajusteSopladoRegistrado = ajustesSoplado.length > 0;
 
@@ -166,16 +168,18 @@ export function CargaDiariaPage() {
       setEmpleadoPareadoId('');
       return;
     }
-    if (!empleadosPareados.some((empleado) => empleado.id === empleadoPareadoId)) {
-      setEmpleadoPareadoId(empleadosPareados[0]?.id ?? '');
-    }
-  }, [empleadoPareadoId, empleadosPareados, requiereRegistroPareado]);
+    setEmpleadoPareadoId(empleadosPareados[0]?.id ?? '');
+  }, [empleadoId, empleadosPareados, requiereRegistroPareado]);
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!empleadoId || !valor) return;
     if (requiereRegistroPareado && (!procesoPareado || !empleadoPareadoId)) {
       setErrorMessage(`Asigna un empleado al proceso ${procesoPareado || etapaPareada || 'complementario'} antes de registrar.`);
+      return;
+    }
+    if (requiereRegistroPareado && empleadoPareadoId === empleadoId) {
+      setErrorMessage('El Aglutinador y el Lavador deben ser empleados diferentes.');
       return;
     }
     if (requiereRegistroPareado && !ajusteSopladoRegistrado && !codigoSoplado) {
@@ -313,11 +317,12 @@ export function CargaDiariaPage() {
                   className="field"
                 >
                   {empleados.map((empleado) => (
-                    <option key={empleado.id} value={empleado.id}>
-                      {empleado.nombre}
+                    <option key={empleado.id} value={empleado.id} disabled={empleadoSoloLavador(empleado)}>
+                      {empleado.nombre}{empleadoSoloLavador(empleado) ? ' · Solo Lavador' : ''}
                     </option>
                   ))}
                 </select>
+                <span className="block text-xs text-slate-500">Los empleados asignados únicamente a Lavado se eligen como complemento del Aglutinador.</span>
               </label>
 
               <label className="space-y-2">
@@ -387,12 +392,14 @@ export function CargaDiariaPage() {
                       <select
                         value={empleadoPareadoId}
                         onChange={(event) => setEmpleadoPareadoId(event.target.value)}
+                        disabled={empleadosPareados.length <= 1}
                         className="field"
                         required
                       >
                         {empleadosPareados.length === 0 && <option value="">No hay empleados disponibles</option>}
                         {empleadosPareados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}
                       </select>
+                      <span className="block text-xs text-slate-500">{empleadosPareados.length > 1 ? 'Selecciona quién realizó el lavado.' : empleadosPareados.length === 1 ? 'El único Lavador disponible fue asignado automáticamente.' : 'Se necesita otro empleado Lavador diferente del Aglutinador.'}</span>
                     </label>
                   </div>
                   {!ajusteSopladoRegistrado ? (
@@ -422,13 +429,13 @@ export function CargaDiariaPage() {
                     </div>
                   )}
                   {!procesoPareado && <p role="alert" className="text-xs font-medium text-rose-300">No existe un proceso complementario en el catálogo. Créalo desde Gestión de empleados.</p>}
-                  {procesoPareado && empleadosPareados.length === 0 && <p role="alert" className="text-xs font-medium text-amber-300">No hay otro empleado activo asignado a {procesoPareado}. Configúralo antes de continuar.</p>}
+                  {procesoPareado && empleadosPareados.length === 0 && <p role="alert" className="text-xs font-medium text-amber-300">No hay un empleado activo asignado a {procesoPareado}. Configúralo antes de continuar.</p>}
                 </div>
               )}
 
               <button
                 type="submit"
-                disabled={saving || materialesDisponibles.length === 0 || (requiereRegistroPareado && (!procesoPareado || !empleadoPareadoId))}
+                disabled={saving || !empleadoId || !proceso || materialesDisponibles.length === 0 || (requiereRegistroPareado && (!procesoPareado || !empleadoPareadoId))}
                 className="btn-primary mt-1 sm:col-span-2"
               >
                 {saving ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Guardando...</> : <><Icon name="plus" className="h-4 w-4" /> Registrar peso</>}

@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { PrinterDialog } from '../components/ui/PrinterDialog';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 import { EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
+import { empleadoSoloLavador, empleadoTieneEtapa, etapaDelProceso, procesosPrincipalesEmpleado } from '../lib/productionFlow';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 const diasSemanaRecibo = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'] as const;
@@ -72,13 +73,6 @@ function usaResumenTermicoPorDia(proceso: string) {
     || nombreNormalizado === 'aglutinador'
     || nombreNormalizado === 'aglutinado'
     || nombreNormalizado === 'servicio';
-}
-
-function etapaDelProceso(proceso: string): 'lavado' | 'aglutinado' | null {
-  const normalizado = proceso.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-  if (normalizado.startsWith('lav')) return 'lavado';
-  if (normalizado.startsWith('aglut')) return 'aglutinado';
-  return null;
 }
 
 function esProcesoPicado(proceso: string) {
@@ -437,15 +431,18 @@ export function AdminDashboardPage() {
     if (!empleados.some((empleado) => empleado.id === selectedEmpleadoId)) {
       setSelectedEmpleadoId(empleados[0].id);
     }
-    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId)) {
-      setAdminRegistroEmpleadoId(empleados[0].id);
+    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId && !empleadoSoloLavador(empleado))) {
+      setAdminRegistroEmpleadoId(empleados.find((empleado) => !empleadoSoloLavador(empleado))?.id ?? '');
     }
   }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
 
   useEffect(() => {
     const empleado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
     if (empleado) {
-      setAdminRegistroProceso(empleado.procesos_asignados[0] ?? empleado.proceso_habitual);
+      const principales = procesosPrincipalesEmpleado(empleado);
+      const aglutinado = principales.find((item) => etapaDelProceso(item) === 'aglutinado');
+      const tieneAmbos = empleadoTieneEtapa(empleado, 'lavado') && empleadoTieneEtapa(empleado, 'aglutinado');
+      setAdminRegistroProceso((actual) => tieneAmbos && aglutinado ? aglutinado : principales.includes(actual) ? actual : principales[0] ?? empleado.proceso_habitual);
     }
   }, [adminRegistroEmpleadoId, empleados]);
 
@@ -484,6 +481,10 @@ export function AdminDashboardPage() {
   }, [adminRegistroDate, isAdmin]);
 
   const adminEtapaActual = etapaDelProceso(adminRegistroProceso);
+  const adminEmpleadoSeleccionado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
+  const adminProcesosDisponibles = adminEmpleadoSeleccionado
+    ? procesosPrincipalesEmpleado(adminEmpleadoSeleccionado)
+    : procesos.filter((item) => etapaDelProceso(item) !== 'lavado');
   const adminMaterialSeleccionado = catalogoMateriales.find((item) => item.codigo === adminRegistroMaterial);
   const codigoSoplado = catalogoMateriales.find(esMaterialSoplado)?.codigo ?? '';
   const adminMaterialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
@@ -500,8 +501,8 @@ export function AdminDashboardPage() {
   const adminEtapaPareada = adminEtapaActual === 'lavado' ? 'aglutinado' : adminEtapaActual === 'aglutinado' ? 'lavado' : null;
   const adminProcesoPareado = catalogoProcesos.find((item) => etapaDelProceso(item.nombre) === adminEtapaPareada)?.nombre ?? '';
   const adminEmpleadosPareados = useMemo(
-    () => empleados.filter((empleado) => empleado.id !== adminRegistroEmpleadoId && empleado.procesos_asignados.includes(adminProcesoPareado)),
-    [adminProcesoPareado, adminRegistroEmpleadoId, empleados]
+    () => empleados.filter((empleado) => empleado.id !== adminRegistroEmpleadoId && empleado.activo && empleadoTieneEtapa(empleado, 'lavado')),
+    [adminRegistroEmpleadoId, empleados]
   );
   const ajustesSopladoAdmin = useMemo(
     () => registrosIngresoLibre.filter((item) => item.es_ajuste_soplado),
@@ -519,10 +520,8 @@ export function AdminDashboardPage() {
       setAdminEmpleadoPareadoId('');
       return;
     }
-    if (!adminEmpleadosPareados.some((item) => item.id === adminEmpleadoPareadoId)) {
-      setAdminEmpleadoPareadoId(adminEmpleadosPareados[0]?.id ?? '');
-    }
-  }, [adminEmpleadoPareadoId, adminEmpleadosPareados, adminRequierePareado]);
+    setAdminEmpleadoPareadoId(adminEmpleadosPareados[0]?.id ?? '');
+  }, [adminEmpleadosPareados, adminRequierePareado]);
 
   const registrosPorEmpleadoYDia = useMemo(() => {
     if (!selectedEmpleadoId || !selectedWeekDate) return [];
@@ -568,6 +567,10 @@ export function AdminDashboardPage() {
     }
     if (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId)) {
       notify('error', 'Selecciona el empleado del proceso complementario.');
+      return;
+    }
+    if (adminRequierePareado && adminEmpleadoPareadoId === adminRegistroEmpleadoId) {
+      notify('error', 'El Aglutinador y el Lavador deben ser empleados diferentes.');
       return;
     }
 
@@ -2345,9 +2348,10 @@ export function AdminDashboardPage() {
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
                     {empleados.map((empleado) => (
-                      <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>
+                      <option key={empleado.id} value={empleado.id} disabled={empleadoSoloLavador(empleado)}>{empleado.nombre}{empleadoSoloLavador(empleado) ? ' · Solo Lavador' : ''}</option>
                     ))}
                   </select>
+                  <span className="block text-xs text-slate-500">Los empleados asignados únicamente a Lavado se seleccionan como complemento del Aglutinador.</span>
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Kilos / gramos</span>
@@ -2371,7 +2375,7 @@ export function AdminDashboardPage() {
                     onChange={(event) => setAdminRegistroProceso(event.target.value as RegistroDiario['proceso'])}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
-                    {procesos.map((proceso) => (
+                    {adminProcesosDisponibles.map((proceso) => (
                       <option key={proceso} value={proceso}>{proceso}</option>
                     ))}
                   </select>
@@ -2391,7 +2395,7 @@ export function AdminDashboardPage() {
                 <button
                   type="button"
                   onClick={() => void handleAdminCrearRegistro()}
-                  disabled={loadingAction || (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
+                  disabled={loadingAction || !adminRegistroEmpleadoId || !adminRegistroProceso || (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId))}
                   className="btn-primary h-[50px] w-full self-end bg-emerald-500 hover:bg-emerald-400"
                 >
                   <Icon name="plus" className="h-4 w-4" /> Registrar kilos
@@ -2414,10 +2418,11 @@ export function AdminDashboardPage() {
                       </label>
                       <label className="space-y-2">
                         <span className="text-sm text-slate-300">Empleado de {adminProcesoPareado || 'proceso complementario'}</span>
-                        <select value={adminEmpleadoPareadoId} onChange={(event) => setAdminEmpleadoPareadoId(event.target.value)} className="field">
+                        <select value={adminEmpleadoPareadoId} onChange={(event) => setAdminEmpleadoPareadoId(event.target.value)} disabled={adminEmpleadosPareados.length <= 1} className="field">
                           {adminEmpleadosPareados.length === 0 && <option value="">No hay empleados disponibles</option>}
                           {adminEmpleadosPareados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}
                         </select>
+                        <span className="block text-xs text-slate-500">{adminEmpleadosPareados.length > 1 ? 'Selecciona quién realizó el lavado.' : adminEmpleadosPareados.length === 1 ? 'El único Lavador disponible fue asignado automáticamente.' : 'Se necesita otro empleado Lavador diferente del Aglutinador.'}</span>
                       </label>
                     </div>
                   )}
