@@ -133,6 +133,7 @@ export function AdminDashboardPage() {
   const [adminEmpleadoPareadoId, setAdminEmpleadoPareadoId] = useState('');
   const [adminSopladoKg, setAdminSopladoKg] = useState('0');
   const [registrosIngresoLibre, setRegistrosIngresoLibre] = useState<RegistroDiario[]>([]);
+  const [registrosIngresoLibreSeleccionados, setRegistrosIngresoLibreSeleccionados] = useState<string[]>([]);
   const [cargandoIngresoLibre, setCargandoIngresoLibre] = useState(false);
   const solicitudIngresoActual = useRef(0);
   const [registroEditValues, setRegistroEditValues] = useState<Record<string, string>>({});
@@ -431,8 +432,8 @@ export function AdminDashboardPage() {
     if (!empleados.some((empleado) => empleado.id === selectedEmpleadoId)) {
       setSelectedEmpleadoId(empleados[0].id);
     }
-    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId && !empleadoSoloLavador(empleado))) {
-      setAdminRegistroEmpleadoId(empleados.find((empleado) => !empleadoSoloLavador(empleado))?.id ?? '');
+    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId)) {
+      setAdminRegistroEmpleadoId(empleados[0]?.id ?? '');
     }
   }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
 
@@ -451,6 +452,7 @@ export function AdminDashboardPage() {
 
     setCargandoIngresoLibre(true);
     setRegistrosIngresoLibre([]);
+    setRegistrosIngresoLibreSeleccionados([]);
     setAdminSopladoKg('0');
     const numeroSolicitud = ++solicitudIngresoActual.current;
     supabase
@@ -483,8 +485,10 @@ export function AdminDashboardPage() {
   const adminEtapaActual = etapaDelProceso(adminRegistroProceso);
   const adminEmpleadoSeleccionado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
   const adminProcesosDisponibles = adminEmpleadoSeleccionado
-    ? procesosPrincipalesEmpleado(adminEmpleadoSeleccionado)
-    : procesos.filter((item) => etapaDelProceso(item) !== 'lavado');
+    ? (adminEmpleadoSeleccionado.procesos_asignados.length
+        ? adminEmpleadoSeleccionado.procesos_asignados
+        : [adminEmpleadoSeleccionado.proceso_habitual])
+    : procesos;
   const adminMaterialSeleccionado = catalogoMateriales.find((item) => item.codigo === adminRegistroMaterial);
   const codigoSoplado = catalogoMateriales.find(esMaterialSoplado)?.codigo ?? '';
   const adminMaterialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
@@ -501,8 +505,13 @@ export function AdminDashboardPage() {
   const adminEtapaPareada = adminEtapaActual === 'lavado' ? 'aglutinado' : adminEtapaActual === 'aglutinado' ? 'lavado' : null;
   const adminProcesoPareado = catalogoProcesos.find((item) => etapaDelProceso(item.nombre) === adminEtapaPareada)?.nombre ?? '';
   const adminEmpleadosPareados = useMemo(
-    () => empleados.filter((empleado) => empleado.id !== adminRegistroEmpleadoId && empleado.activo && empleadoTieneEtapa(empleado, 'lavado')),
-    [adminRegistroEmpleadoId, empleados]
+    () => empleados.filter((empleado) =>
+      empleado.id !== adminRegistroEmpleadoId
+      && empleado.activo
+      && Boolean(adminEtapaPareada)
+      && empleadoTieneEtapa(empleado, adminEtapaPareada!)
+    ),
+    [adminEtapaPareada, adminRegistroEmpleadoId, empleados]
   );
   const ajustesSopladoAdmin = useMemo(
     () => registrosIngresoLibre.filter((item) => item.es_ajuste_soplado),
@@ -545,6 +554,18 @@ export function AdminDashboardPage() {
       registrosIngresoLibre
     ]
   );
+  const idsRegistrosIngresoLibreVisibles = useMemo(
+    () => registrosIngresoLibreFiltrados.map((registro) => registro.id),
+    [registrosIngresoLibreFiltrados]
+  );
+  const todosRegistrosIngresoLibreSeleccionados = idsRegistrosIngresoLibreVisibles.length > 0
+    && idsRegistrosIngresoLibreVisibles.every((id) => registrosIngresoLibreSeleccionados.includes(id));
+
+  useEffect(() => {
+    setRegistrosIngresoLibreSeleccionados((actuales) =>
+      actuales.filter((id) => idsRegistrosIngresoLibreVisibles.includes(id))
+    );
+  }, [idsRegistrosIngresoLibreVisibles]);
 
   const selectedEmpleadoName = useMemo(
     () => empleados.find((item) => item.id === selectedEmpleadoId)?.nombre ?? '',
@@ -1168,6 +1189,7 @@ export function AdminDashboardPage() {
       setRegistros((current) => current.filter((item) => item.id !== id));
       setRegistrosAnalitica((current) => current.filter((item) => item.id !== id));
       setRegistrosIngresoLibre((current) => current.filter((item) => item.id !== id));
+      setRegistrosIngresoLibreSeleccionados((current) => current.filter((itemId) => itemId !== id));
       setRegistroEditValues((current) => {
         const siguiente = { ...current };
         delete siguiente[id];
@@ -1181,6 +1203,31 @@ export function AdminDashboardPage() {
       notify('success', 'El registro fue eliminado de todas las vistas.');
     } else {
       notify('error', `No se pudo eliminar el registro: ${error.message}`);
+    }
+    setLoadingAction(false);
+  }
+
+  async function handleEliminarRegistrosDiarios(ids: string[]) {
+    const idsUnicos = [...new Set(ids)];
+    if (!idsUnicos.length) return;
+
+    setLoadingAction(true);
+    const { error } = await supabase.from('registros_diarios').delete().in('id', idsUnicos);
+    if (!error) {
+      const idsEliminados = new Set(idsUnicos);
+      setRegistros((current) => current.filter((item) => !idsEliminados.has(item.id)));
+      setRegistrosAnalitica((current) => current.filter((item) => !idsEliminados.has(item.id)));
+      setRegistrosIngresoLibre((current) => current.filter((item) => !idsEliminados.has(item.id)));
+      setRegistrosIngresoLibreSeleccionados([]);
+      setRegistroEditValues((current) => Object.fromEntries(
+        Object.entries(current).filter(([id]) => !idsEliminados.has(id))
+      ));
+      setRegistroProcesoEditValues((current) => Object.fromEntries(
+        Object.entries(current).filter(([id]) => !idsEliminados.has(id))
+      ));
+      notify('success', `${idsUnicos.length} registro(s) fueron eliminados de todas las vistas.`);
+    } else {
+      notify('error', `No se pudieron eliminar los registros: ${error.message}`);
     }
     setLoadingAction(false);
   }
@@ -2348,10 +2395,10 @@ export function AdminDashboardPage() {
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
                     {empleados.map((empleado) => (
-                      <option key={empleado.id} value={empleado.id} disabled={empleadoSoloLavador(empleado)}>{empleado.nombre}{empleadoSoloLavador(empleado) ? ' · Solo Lavador' : ''}</option>
+                      <option key={empleado.id} value={empleado.id}>{empleado.nombre}{empleadoSoloLavador(empleado) ? ' · Solo Lavador' : ''}</option>
                     ))}
                   </select>
-                  <span className="block text-xs text-slate-500">Los empleados asignados únicamente a Lavado se seleccionan como complemento del Aglutinador.</span>
+                  <span className="block text-xs text-slate-500">Selecciona cualquier empleado, incluido el Lavador, para consultar, corregir o eliminar sus registros.</span>
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Kilos / gramos</span>
@@ -2361,6 +2408,11 @@ export function AdminDashboardPage() {
                     step="0.1"
                     value={adminRegistroKilos}
                     onChange={(event) => setAdminRegistroKilos(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || loadingAction) return;
+                      event.preventDefault();
+                      void handleAdminCrearRegistro();
+                    }}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                     placeholder="0.0"
                   />
@@ -2422,7 +2474,7 @@ export function AdminDashboardPage() {
                           {adminEmpleadosPareados.length === 0 && <option value="">No hay empleados disponibles</option>}
                           {adminEmpleadosPareados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}
                         </select>
-                        <span className="block text-xs text-slate-500">{adminEmpleadosPareados.length > 1 ? 'Selecciona quién realizó el lavado.' : adminEmpleadosPareados.length === 1 ? 'El único Lavador disponible fue asignado automáticamente.' : 'Se necesita otro empleado Lavador diferente del Aglutinador.'}</span>
+                        <span className="block text-xs text-slate-500">{adminEmpleadosPareados.length > 1 ? `Selecciona quién realizó ${adminProcesoPareado}.` : adminEmpleadosPareados.length === 1 ? `El único empleado de ${adminProcesoPareado} disponible fue asignado automáticamente.` : `Se necesita otro empleado activo para ${adminProcesoPareado}.`}</span>
                       </label>
                     </div>
                   )}
@@ -2452,14 +2504,43 @@ export function AdminDashboardPage() {
 
               <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-xs text-slate-400">
                 <span>La fecha, el empleado, el proceso y el material también filtran la tabla.</span>
-                <span className="font-semibold text-slate-200">
-                  {cargandoIngresoLibre ? 'Consultando…' : `${registrosIngresoLibreFiltrados.length} registro(s)`}
-                </span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-semibold text-slate-200">
+                    {cargandoIngresoLibre ? 'Consultando…' : `${registrosIngresoLibreFiltrados.length} registro(s) · ${registrosIngresoLibreSeleccionados.length} seleccionado(s)`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={loadingAction || registrosIngresoLibreSeleccionados.length === 0}
+                    onClick={() => {
+                      const ids = [...registrosIngresoLibreSeleccionados];
+                      setConfirmAction({
+                        title: `Eliminar ${ids.length} registro(s)`,
+                        description: 'Los registros seleccionados desaparecerán del consolidado, la analítica y el ingreso libre. Esta acción no se puede deshacer.',
+                        run: () => handleEliminarRegistrosDiarios(ids)
+                      });
+                    }}
+                    className="rounded-xl bg-rose-500 px-3 py-2 font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Eliminar seleccionados
+                  </button>
+                </div>
               </div>
               <div className="responsive-table mt-6 overflow-x-auto">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-300">
+                      <th className="w-12 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          aria-label="Seleccionar todos los registros visibles"
+                          checked={todosRegistrosIngresoLibreSeleccionados}
+                          disabled={loadingAction || idsRegistrosIngresoLibreVisibles.length === 0}
+                          onChange={(event) => setRegistrosIngresoLibreSeleccionados(
+                            event.target.checked ? idsRegistrosIngresoLibreVisibles : []
+                          )}
+                          className="h-4 w-4 accent-indigo-500"
+                        />
+                      </th>
                       <th className="px-4 py-3">Fecha</th>
                       <th className="px-4 py-3">Empleado</th>
                       <th className="px-4 py-3">Proceso</th>
@@ -2471,6 +2552,20 @@ export function AdminDashboardPage() {
                   <tbody>
                     {registrosIngresoLibreFiltrados.map((registro) => (
                       <tr key={registro.id} className="border-b border-slate-800 hover:bg-slate-950/60">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            aria-label={`Seleccionar registro de ${registro.fecha}`}
+                            checked={registrosIngresoLibreSeleccionados.includes(registro.id)}
+                            disabled={loadingAction}
+                            onChange={(event) => setRegistrosIngresoLibreSeleccionados((actuales) =>
+                              event.target.checked
+                                ? [...actuales, registro.id]
+                                : actuales.filter((id) => id !== registro.id)
+                            )}
+                            className="h-4 w-4 accent-indigo-500"
+                          />
+                        </td>
                         <td className="px-4 py-3">{registro.fecha}</td>
                         <td className="px-4 py-3">{empleados.find((emp) => emp.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>
                         <td className="px-4 py-3">{registro.proceso}</td>
@@ -2509,7 +2604,7 @@ export function AdminDashboardPage() {
                     ))}
                     {!cargandoIngresoLibre && registrosIngresoLibreFiltrados.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                        <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                           No hay registros que coincidan con los cuatro filtros.
                         </td>
                       </tr>
