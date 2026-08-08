@@ -145,11 +145,12 @@ export function AdminDashboardPage() {
   const [nuevoTarifaPrecio, setNuevoTarifaPrecio] = useState<number>(0);
   const [nuevoPagoDescripcion, setNuevoPagoDescripcion] = useState('');
   const [nuevoPagoValor, setNuevoPagoValor] = useState('');
+  const [nuevoPagoTipo, setNuevoPagoTipo] = useState<PagoAdicional['tipo']>('adicional');
   const [pagoEmpleadoId, setPagoEmpleadoId] = useState<string>('');
   const [nuevoPagoFecha, setNuevoPagoFecha] = useState(formatLocalDate(new Date()));
   const [filtroPagoFecha, setFiltroPagoFecha] = useState('');
   const [filtroPagoEmpleado, setFiltroPagoEmpleado] = useState('');
-  const [pagoEditValues, setPagoEditValues] = useState<Record<string, { fecha: string; descripcion: string; valor: string }>>({});
+  const [pagoEditValues, setPagoEditValues] = useState<Record<string, { fecha: string; descripcion: string; valor: string; tipo: PagoAdicional['tipo'] }>>({});
   const [loadingAction, setLoadingAction] = useState(false);
   const [activeTab, setActiveTab] = useState<'gestion' | 'tarifas' | 'consolidado' | 'analitica'>('gestion');
   const [periodoAnalitica, setPeriodoAnalitica] = useState<'dia' | 'semana' | 'mes'>('semana');
@@ -325,7 +326,8 @@ export function AdminDashboardPage() {
       setPagoEditValues(Object.fromEntries(pagosData.map((pago) => [pago.id, {
         fecha: pago.fecha ?? semanaInicio,
         descripcion: pago.descripcion,
-        valor: new Intl.NumberFormat('es-CO').format(pago.valor)
+        valor: new Intl.NumberFormat('es-CO').format(Math.abs(pago.valor)),
+        tipo: pago.tipo ?? 'adicional'
       }])));
       setNominasSemanales((resultadoNominas.data ?? []) as NominaSemanal[]);
       setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
@@ -397,7 +399,7 @@ export function AdminDashboardPage() {
       if (cierres.length) {
         const resultadoNominas = await supabase
           .from('nominas_semanales')
-          .select('*, nomina_pago_adicional_detalle(id,fecha,descripcion,valor), nomina_produccion_detalle(id,fecha,proceso,material,material_nombre,peso_kg,precio_unidad,subtotal,es_ajuste_soplado)')
+          .select('*, nomina_pago_adicional_detalle(id,fecha,descripcion,valor,tipo), nomina_produccion_detalle(id,fecha,proceso,material,material_nombre,peso_kg,precio_unidad,subtotal,es_ajuste_soplado)')
           .in('cierre_id', cierres.map((cierre) => cierre.id))
           .order('empleado_nombre', { ascending: true });
         nominas = (resultadoNominas.data as NominaHistorica[] | null) ?? [];
@@ -917,15 +919,15 @@ export function AdminDashboardPage() {
           .line(fitColumns('Producción', formatReceiptCurrency(subtotalProduccion)));
       }
 
-      receipt.bold(true).line('PAGOS ADICIONALES').bold(false);
+      receipt.bold(true).line('ADICIONALES Y PRESTAMOS').bold(false);
       if (pagosAdicionalesEmpleado.length) {
         pagosAdicionalesEmpleado.forEach((pago) => {
           receipt
-            .wrapped(pago.descripcion)
-            .line(fitColumns('Valor', formatReceiptCurrency(pago.valor)));
+            .wrapped(`${pago.tipo === 'prestamo' ? 'Prestamo' : 'Adicional'}: ${pago.descripcion}`)
+            .line(fitColumns(pago.tipo === 'prestamo' ? 'Descuento' : 'Valor', formatReceiptCurrency(Math.abs(pago.valor))));
         });
       } else {
-        receipt.line(fitColumns('Sin pagos adicionales', formatReceiptCurrency(0)));
+        receipt.line(fitColumns('Sin conceptos', formatReceiptCurrency(0)));
       }
 
       receipt
@@ -1053,17 +1055,18 @@ export function AdminDashboardPage() {
     setLoadingAction(true);
     const { data, error } = await supabase
       .from('pagos_adicionales')
-      .insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], fecha: nuevoPagoFecha, descripcion: nuevoPagoDescripcion.trim(), valor: valorPago }])
+      .insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], fecha: nuevoPagoFecha, descripcion: nuevoPagoDescripcion.trim(), valor: valorPago, tipo: nuevoPagoTipo }])
       .select()
       .single();
     if (!error && data) {
       const creado = data as PagoAdicional;
       setPagosAdicionales((current) => [...current, creado]);
-      setPagoEditValues((current) => ({ ...current, [creado.id]: { fecha: creado.fecha, descripcion: creado.descripcion, valor: formatCurrencyInput(String(creado.valor)) } }));
+      setPagoEditValues((current) => ({ ...current, [creado.id]: { fecha: creado.fecha, descripcion: creado.descripcion, valor: formatCurrencyInput(String(Math.abs(creado.valor))), tipo: creado.tipo } }));
       setNuevoPagoDescripcion('');
       setNuevoPagoValor('');
       setPagoEmpleadoId('');
-      notify('success', 'El pago adicional fue agregado y los totales se actualizaron.');
+      setNuevoPagoTipo('adicional');
+      notify('success', nuevoPagoTipo === 'prestamo' ? 'El préstamo fue agregado como descuento.' : 'El pago adicional fue agregado y los totales se actualizaron.');
     } else {
       notify('error', `No se pudo agregar el pago: ${error?.message ?? 'error desconocido'}`);
     }
@@ -1134,7 +1137,7 @@ export function AdminDashboardPage() {
     setLoadingAction(true);
     const { data, error } = await supabase
       .from('pagos_adicionales')
-      .update({ fecha: values.fecha, descripcion: values.descripcion.trim(), valor })
+      .update({ fecha: values.fecha, descripcion: values.descripcion.trim(), valor, tipo: values.tipo })
       .eq('id', id)
       .eq('semana_inicio', weekDates[0])
       .select()
@@ -1142,7 +1145,7 @@ export function AdminDashboardPage() {
     if (!error && data) {
       const actualizado = data as PagoAdicional;
       setPagosAdicionales((current) => current.map((pago) => pago.id === id ? actualizado : pago));
-      setPagoEditValues((current) => ({ ...current, [id]: { fecha: actualizado.fecha, descripcion: actualizado.descripcion, valor: formatCurrencyInput(String(actualizado.valor)) } }));
+      setPagoEditValues((current) => ({ ...current, [id]: { fecha: actualizado.fecha, descripcion: actualizado.descripcion, valor: formatCurrencyInput(String(Math.abs(actualizado.valor))), tipo: actualizado.tipo } }));
       notify('success', 'El pago adicional fue actualizado.');
     } else {
       notify('error', `No se pudo actualizar el pago adicional: ${error?.message ?? 'error desconocido'}`);
@@ -1501,7 +1504,7 @@ export function AdminDashboardPage() {
   }
 
   function exportSemanalCsv() {
-    const headers = ['Empleado', ...weekDates, 'Total kg', 'Pago adicional', 'Total a pagar'];
+    const headers = ['Empleado', ...weekDates, 'Total kg', 'Adicionales y préstamos', 'Total a pagar'];
     const rows = empleados.map((empleado) => {
       const esPlanta = esEmpleadoDePlanta(empleado);
       const values = weekDates.map((iso) => {
@@ -2070,7 +2073,7 @@ export function AdminDashboardPage() {
                     <th key={dia} className="px-4 py-3">{dia} ({weekDates[index]})</th>
                   ))}
                   <th className="px-4 py-3">Total kg</th>
-                  <th className="px-4 py-3">Pago adicional</th>
+                  <th className="px-4 py-3">Adicionales / préstamos</th>
                   <th className="px-4 py-3">Total a pagar</th>
                   <th className="px-4 py-3 text-center">Acción</th>
                 </tr>
@@ -2098,7 +2101,7 @@ export function AdminDashboardPage() {
                     );
                   })}
                       <td className="px-4 py-3 font-semibold text-sky-300">{esPlanta ? 'N/A' : resumenNomina.totalKg.toFixed(0)}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-100">{formatCurrency(resumenNomina.pagoAdicional)}</td>
+                      <td className={`px-4 py-3 font-semibold ${resumenNomina.pagoAdicional < 0 ? 'text-rose-300' : 'text-slate-100'}`}>{formatCurrency(resumenNomina.pagoAdicional)}</td>
                       <td className="px-4 py-3 font-semibold text-emerald-300">
                         {formatCurrency(resumenNomina.totalPagar)}
                       </td>
@@ -2135,7 +2138,7 @@ export function AdminDashboardPage() {
                     <th key={`resumen-${dia}`} className="px-4 py-3 text-slate-400">{dia}</th>
                   ))}
                   <th className="px-4 py-3 text-slate-400">Total kg</th>
-                  <th className="px-4 py-3 text-slate-400">Pago adicional</th>
+                  <th className="px-4 py-3 text-slate-400">Adicionales / préstamos</th>
                   <th className="px-4 py-3 text-slate-400">Total a pagar</th>
                 </tr>
                 {resumenProcesoMaterialSemana.map((item) => (
@@ -2615,15 +2618,22 @@ export function AdminDashboardPage() {
             </div>
           )}
 
-          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+          <div className="grid gap-6 xl:grid-cols-[3fr_1fr]">
             <div className="card p-5 sm:p-6">
               <h3 className="text-xl font-semibold">Pagos adicionales</h3>
               <p className="mt-1 text-sm text-slate-400">Registra y consulta conceptos por fecha y empleado dentro de la semana.</p>
               {isAdmin && (
-              <form onSubmit={handleCrearPagoAdicional} className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <form onSubmit={handleCrearPagoAdicional} className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[145px_160px_minmax(160px,1.1fr)_minmax(170px,1.2fr)_145px_130px]">
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Fecha</span>
                   <input type="date" min={weekDates[0]} max={weekDates[weekDates.length - 1]} value={nuevoPagoFecha} onChange={(event) => setNuevoPagoFecha(event.target.value)} disabled={semanaNominaNoEditable} className="w-full rounded-2xl bg-slate-900 px-4 py-3" />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm text-slate-300">Tipo</span>
+                  <select value={nuevoPagoTipo} onChange={(event) => setNuevoPagoTipo(event.target.value as PagoAdicional['tipo'])} disabled={semanaNominaNoEditable} className="w-full rounded-2xl bg-slate-900 px-4 py-3">
+                    <option value="adicional">Pago adicional</option>
+                    <option value="prestamo">Préstamo al trabajador</option>
+                  </select>
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Empleado</span>
@@ -2661,7 +2671,7 @@ export function AdminDashboardPage() {
                     disabled={semanaNominaNoEditable}
                     className="w-full rounded-2xl bg-slate-900 py-3 pl-9 pr-4"
                     placeholder="9.000"
-                    aria-label="Valor del pago adicional en pesos colombianos"
+                    aria-label="Valor del concepto en pesos colombianos"
                   />
                   </div>
                 </label>
@@ -2680,14 +2690,15 @@ export function AdminDashboardPage() {
                 <label className="field-label"><span>Filtrar por empleado</span><select value={filtroPagoEmpleado} onChange={(event) => setFiltroPagoEmpleado(event.target.value)} className="field-input"><option value="">Todos los empleados</option>{empleados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}</select></label>
                 <button type="button" className="btn-secondary h-12" onClick={() => { const hoy = formatLocalDate(new Date()); setFiltroPagoFecha(weekDates.includes(hoy) ? hoy : weekDates[0] ?? ''); setFiltroPagoEmpleado(''); }}>Restablecer filtros</button>
               </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{pagosAdicionalesFiltrados.length} de {pagosAdicionales.length} pagos adicionales</span><span>Total filtrado: <strong className="text-emerald-300">{formatCurrency(pagosAdicionalesFiltrados.reduce((sum, pago) => sum + pago.valor, 0))}</strong></span></div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{pagosAdicionalesFiltrados.length} de {pagosAdicionales.length} conceptos</span><span>Neto filtrado: <strong className="text-emerald-300">{formatCurrency(pagosAdicionalesFiltrados.reduce((sum, pago) => sum + pago.valor, 0))}</strong></span></div>
               <div className="mt-6 space-y-3">
                 {pagosAdicionalesFiltrados.map((pago) => {
-                  const editValues = pagoEditValues[pago.id] ?? { fecha: pago.fecha ?? weekDates[0] ?? '', descripcion: pago.descripcion, valor: formatCurrencyInput(String(pago.valor)) };
+                  const editValues = pagoEditValues[pago.id] ?? { fecha: pago.fecha ?? weekDates[0] ?? '', descripcion: pago.descripcion, valor: formatCurrencyInput(String(Math.abs(pago.valor))), tipo: pago.tipo ?? 'adicional' };
                   return <div key={pago.id} className="rounded-3xl border border-slate-800 bg-slate-900/95 p-4">
                     <p className="mb-3 font-semibold text-white">{empleados.find((emp) => emp.id === pago.empleado_id)?.nombre ?? 'Empleado'}</p>
-                    <div className="grid gap-3 md:grid-cols-[160px_1fr_180px_auto] md:items-end">
+                    <div className="grid gap-3 md:grid-cols-[160px_190px_1fr_180px_auto] md:items-end">
                       <label className="field-label"><span>Fecha</span><input type="date" min={weekDates[0]} max={weekDates[weekDates.length - 1]} value={editValues.fecha} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, fecha: event.target.value } }))} className="field-input" /></label>
+                      <label className="field-label"><span>Tipo</span><select value={editValues.tipo} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, tipo: event.target.value as PagoAdicional['tipo'] } }))} className="field-input"><option value="adicional">Pago adicional</option><option value="prestamo">Préstamo</option></select></label>
                       <label className="field-label"><span>Concepto</span><input value={editValues.descripcion} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, descripcion: event.target.value } }))} className="field-input" /></label>
                       <label className="field-label"><span>Valor</span><div className="relative"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-slate-500">$</span><input type="text" inputMode="numeric" value={editValues.valor} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, valor: formatCurrencyInput(event.target.value) } }))} className="field-input pl-9" /></div></label>
                       {isAdmin && <div className="flex gap-2"><button type="button" onClick={() => void handleActualizarPagoAdicional(pago.id)} disabled={semanaNominaNoEditable || loadingAction} className="btn-primary h-12 px-3">Guardar</button><button type="button" onClick={() => void handleEliminarPagoAdicional(pago.id)} disabled={semanaNominaNoEditable || loadingAction} className="btn-danger h-12 px-3">Eliminar</button></div>}
@@ -2716,7 +2727,8 @@ export function AdminDashboardPage() {
               </button>}
               <div className="mt-6 space-y-3 text-slate-300">
                 <p>Total empleados: {empleados.length}</p>
-                <p>Total pagos extras: {formatCurrency(pagosAdicionales.reduce((sum, pago) => sum + pago.valor, 0))}</p>
+                <p>Pagos adicionales: {formatCurrency(pagosAdicionales.filter((pago) => pago.tipo !== 'prestamo').reduce((sum, pago) => sum + pago.valor, 0))}</p>
+                <p>Préstamos descontados: {formatCurrency(pagosAdicionales.filter((pago) => pago.tipo === 'prestamo').reduce((sum, pago) => sum + Math.abs(pago.valor), 0))}</p>
                 <p className="font-semibold">Total a pagar general: {formatCurrency(totalAPagarSemana)}</p>
               </div>
             </div>
@@ -2802,8 +2814,8 @@ export function AdminDashboardPage() {
                               <td data-label="Proceso" className="px-4 py-3 text-slate-300">{nomina.proceso_snapshot ?? '-'}</td>
                               <td data-label="Kilos" className="px-4 py-3 text-right">{nomina.total_kg.toLocaleString('es-CO')} kg</td>
                               <td data-label="Producción" className="px-4 py-3 text-right">{formatCurrency(nomina.subtotal_produccion ?? 0)}</td>
-                              <td data-label="Conceptos" className="px-4 py-3"><div className="space-y-1">{nomina.nomina_pago_adicional_detalle?.length ? nomina.nomina_pago_adicional_detalle.map((detalle) => <div key={detalle.id} className="flex justify-between gap-3 text-xs"><span className="text-slate-400">{detalle.fecha} · {detalle.descripcion}</span><span className="whitespace-nowrap text-amber-300">{formatCurrency(detalle.valor)}</span></div>) : <span className="text-xs text-slate-600">Sin conceptos</span>}</div></td>
-                              <td data-label="Adicionales" className="px-4 py-3 text-right text-amber-300">{formatCurrency(nomina.pago_adicional)}</td>
+                              <td data-label="Conceptos" className="px-4 py-3"><div className="space-y-1">{nomina.nomina_pago_adicional_detalle?.length ? nomina.nomina_pago_adicional_detalle.map((detalle) => <div key={detalle.id} className="flex justify-between gap-3 text-xs"><span className="text-slate-400">{detalle.fecha} · {detalle.tipo === 'prestamo' ? 'Préstamo' : 'Adicional'} · {detalle.descripcion}</span><span className={`whitespace-nowrap ${detalle.tipo === 'prestamo' ? 'text-rose-300' : 'text-amber-300'}`}>{detalle.tipo === 'prestamo' ? '− ' : '+ '}{formatCurrency(Math.abs(detalle.valor))}</span></div>) : <span className="text-xs text-slate-600">Sin conceptos</span>}</div></td>
+                              <td data-label="Neto conceptos" className={`px-4 py-3 text-right ${nomina.pago_adicional < 0 ? 'text-rose-300' : 'text-amber-300'}`}>{formatCurrency(nomina.pago_adicional)}</td>
                               <td data-label="Total pagado" className="px-4 py-3 text-right font-bold text-emerald-300">{formatCurrency(nomina.total_pagar)}</td>
                             </tr>
                           ))}</tbody>

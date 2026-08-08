@@ -42,6 +42,7 @@ export interface PagoAdicional {
   fecha: string;
   descripcion: string;
   valor: number;
+  tipo: 'adicional' | 'prestamo';
   created_at: string;
 }
 
@@ -80,6 +81,7 @@ export interface NominaPagoAdicionalDetalle {
   fecha: string;
   descripcion: string;
   valor: number;
+  tipo: 'adicional' | 'prestamo';
 }
 
 export interface NominaProduccionDetalle {
