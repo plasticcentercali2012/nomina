@@ -4,16 +4,18 @@ import { CargaDiariaPage } from './pages/CargaDiariaPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { useAuth } from './hooks/useAuth';
 import { LoadingScreen } from './components/ui/LoadingScreen';
+import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 
 function App() {
   const { profile, loading } = useAuth();
 
   if (loading) {
-    return <LoadingScreen />;
+    return <><LoadingScreen /><PwaUpdatePrompt /></>;
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
       <Route
         path="/login"
         element={
@@ -31,7 +33,9 @@ function App() {
         element={profile?.rol === 'admin' || profile?.rol === 'gerencial' ? <AdminDashboardPage /> : <Navigate to="/login" replace />}
       />
       <Route path="/*" element={<Navigate to={profile?.rol === 'admin' || profile?.rol === 'gerencial' ? '/admin' : '/carga-diaria'} replace />} />
-    </Routes>
+      </Routes>
+      <PwaUpdatePrompt />
+    </>
   );
 }
 
