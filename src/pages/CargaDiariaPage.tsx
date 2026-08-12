@@ -206,7 +206,9 @@ export function CargaDiariaPage() {
       material,
       peso_kg: peso,
       cantidad_bultos: null,
-      creado_por: profile?.id ?? ''
+      creado_por: profile?.id ?? '',
+      es_ajuste_soplado: false,
+      material_referencia: null
     };
 
     const entries: Array<Omit<RegistroDiario, 'id'>> = requiereRegistroPareado ? [
@@ -234,7 +236,10 @@ export function CargaDiariaPage() {
       const ajustesCreados = (data as RegistroDiario[]).filter((item) => item.es_ajuste_soplado);
       if (ajustesCreados.length) setAjustesSoplado(ajustesCreados);
     } else {
-      setErrorMessage('No se pudo registrar. Intenta nuevamente.');
+      console.error('Error al registrar la carga diaria:', error);
+      setErrorMessage(error?.message
+        ? `No se pudo registrar: ${error.message}`
+        : 'No se pudo registrar. Intenta nuevamente.');
       setTimeout(() => setErrorMessage(''), 4000);
     }
 
