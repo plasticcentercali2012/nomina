@@ -49,7 +49,7 @@ export function CargaDiariaPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    supabase.from('procesos').select('nombre').order('nombre').then(({ data }) => data && setCatalogoProcesos(data as CatalogoProceso[]));
+    supabase.from('procesos').select('nombre,paga_por_kilo').order('nombre').then(({ data }) => data && setCatalogoProcesos(data as CatalogoProceso[]));
     supabase.from('materiales').select('codigo,nombre,requiere_lavado,requiere_aglutinado').order('nombre').then(({ data }) => setCatalogoMateriales((data as CatalogoMaterial[]) ?? []));
     supabase
       .from('empleados')
@@ -111,7 +111,7 @@ export function CargaDiariaPage() {
     [registros]
   );
 
-  const procesos = useMemo(() => catalogoProcesos.map((item) => item.nombre), [catalogoProcesos]);
+  const procesos = useMemo(() => catalogoProcesos.filter((item) => item.paga_por_kilo).map((item) => item.nombre), [catalogoProcesos]);
   const materialDisplayNames = useMemo(
     () => Object.fromEntries(catalogoMateriales.map((item) => [item.codigo, item.nombre])) as Record<string, string>,
     [catalogoMateriales]

@@ -19,6 +19,7 @@ export type Proceso = string;
 
 export interface CatalogoProceso {
   nombre: string;
+  paga_por_kilo: boolean;
 }
 
 export interface CatalogoMaterial {
@@ -43,6 +44,7 @@ export interface PagoAdicional {
   descripcion: string;
   valor: number;
   tipo: 'adicional' | 'prestamo';
+  proceso: string | null;
   created_at: string;
 }
 
@@ -82,6 +84,7 @@ export interface NominaPagoAdicionalDetalle {
   descripcion: string;
   valor: number;
   tipo: 'adicional' | 'prestamo';
+  proceso?: string | null;
 }
 
 export interface NominaProduccionDetalle {

@@ -142,15 +142,16 @@ export function AdminDashboardPage() {
   const [nuevoEmpleadoProcesos, setNuevoEmpleadoProcesos] = useState<Proceso[]>(['Picador']);
   const [nuevoTarifaProceso, setNuevoTarifaProceso] = useState<Tarifa['proceso']>('Picador');
   const [nuevoTarifaMaterial, setNuevoTarifaMaterial] = useState<Tarifa['material']>('Poli');
-  const [nuevoTarifaPrecio, setNuevoTarifaPrecio] = useState<number>(0);
+  const [nuevoTarifaPrecio, setNuevoTarifaPrecio] = useState('');
   const [nuevoPagoDescripcion, setNuevoPagoDescripcion] = useState('');
   const [nuevoPagoValor, setNuevoPagoValor] = useState('');
   const [nuevoPagoTipo, setNuevoPagoTipo] = useState<PagoAdicional['tipo']>('adicional');
+  const [nuevoPagoProceso, setNuevoPagoProceso] = useState('');
   const [pagoEmpleadoId, setPagoEmpleadoId] = useState<string>('');
   const [nuevoPagoFecha, setNuevoPagoFecha] = useState(formatLocalDate(new Date()));
   const [filtroPagoFecha, setFiltroPagoFecha] = useState('');
   const [filtroPagoEmpleado, setFiltroPagoEmpleado] = useState('');
-  const [pagoEditValues, setPagoEditValues] = useState<Record<string, { fecha: string; descripcion: string; valor: string; tipo: PagoAdicional['tipo'] }>>({});
+  const [pagoEditValues, setPagoEditValues] = useState<Record<string, { fecha: string; descripcion: string; valor: string; tipo: PagoAdicional['tipo']; proceso: string }>>({});
   const [loadingAction, setLoadingAction] = useState(false);
   const [activeTab, setActiveTab] = useState<'gestion' | 'tarifas' | 'consolidado' | 'analitica'>('gestion');
   const [periodoAnalitica, setPeriodoAnalitica] = useState<'dia' | 'semana' | 'mes'>('semana');
@@ -177,7 +178,9 @@ export function AdminDashboardPage() {
   }>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [nuevoProcesoNombre, setNuevoProcesoNombre] = useState('');
+  const [nuevoProcesoPagaPorKilo, setNuevoProcesoPagaPorKilo] = useState(true);
   const [procesoEditValues, setProcesoEditValues] = useState<Record<string, string>>({});
+  const [procesoPagoKiloEditValues, setProcesoPagoKiloEditValues] = useState<Record<string, boolean>>({});
   const [nuevoMaterialCodigo, setNuevoMaterialCodigo] = useState('');
   const [nuevoMaterialNombre, setNuevoMaterialNombre] = useState('');
   const [nuevoMaterialLavado, setNuevoMaterialLavado] = useState(false);
@@ -185,6 +188,10 @@ export function AdminDashboardPage() {
   const [materialEditValues, setMaterialEditValues] = useState<Record<string, string>>({});
   const [empleadosTableExpanded, setEmpleadosTableExpanded] = useState(false);
   const [detalleAnaliticaExpanded, setDetalleAnaliticaExpanded] = useState(false);
+  const [consolidadoSemanalExpanded, setConsolidadoSemanalExpanded] = useState(false);
+  const [detalleEmpleadoExpanded, setDetalleEmpleadoExpanded] = useState(false);
+  const [ingresoLibreExpanded, setIngresoLibreExpanded] = useState(false);
+  const [pagosAdicionalesExpanded, setPagosAdicionalesExpanded] = useState(false);
 
   const weekDates = useMemo(() => {
     if (!semanaInicio) return [];
@@ -197,6 +204,8 @@ export function AdminDashboardPage() {
   }, [semanaInicio]);
 
   const procesos = useMemo(() => catalogoProcesos.map((item) => item.nombre), [catalogoProcesos]);
+  const procesosPorKilo = useMemo(() => catalogoProcesos.filter((item) => item.paga_por_kilo).map((item) => item.nombre), [catalogoProcesos]);
+  const procesosPorConcepto = useMemo(() => catalogoProcesos.filter((item) => !item.paga_por_kilo), [catalogoProcesos]);
   const materiales = useMemo(() => catalogoMateriales.map((item) => item.codigo), [catalogoMateriales]);
   const materialDisplayNames = useMemo(
     () => Object.fromEntries(catalogoMateriales.map((item) => [item.codigo, item.nombre])) as Record<string, string>,
@@ -259,11 +268,12 @@ export function AdminDashboardPage() {
       .select('*, empleado_procesos(proceso)')
       .order('nombre', { ascending: true })
       .then(({ data }) => data && setEmpleados((data as EmpleadoRow[]).map(normalizeEmpleado)));
-    supabase.from('procesos').select('nombre').order('nombre').then(({ data }) => {
+    supabase.from('procesos').select('nombre,paga_por_kilo').order('nombre').then(({ data }) => {
       if (data) {
         const items = data as CatalogoProceso[];
         setCatalogoProcesos(items);
         setProcesoEditValues(Object.fromEntries(items.map((item) => [item.nombre, item.nombre])));
+        setProcesoPagoKiloEditValues(Object.fromEntries(items.map((item) => [item.nombre, item.paga_por_kilo])));
       }
     });
     supabase.from('materiales').select('codigo,nombre,requiere_lavado,requiere_aglutinado').order('nombre').then(({ data }) => {
@@ -327,7 +337,8 @@ export function AdminDashboardPage() {
         fecha: pago.fecha ?? semanaInicio,
         descripcion: pago.descripcion,
         valor: new Intl.NumberFormat('es-CO').format(Math.abs(pago.valor)),
-        tipo: pago.tipo ?? 'adicional'
+        tipo: pago.tipo ?? 'adicional',
+        proceso: pago.proceso ?? ''
       }])));
       setNominasSemanales((resultadoNominas.data ?? []) as NominaSemanal[]);
       setRegistroEditValues(Object.fromEntries(registrosData.map((item) => [item.id, item.peso_kg?.toString() ?? ''])));
@@ -486,11 +497,11 @@ export function AdminDashboardPage() {
 
   const adminEtapaActual = etapaDelProceso(adminRegistroProceso);
   const adminEmpleadoSeleccionado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
-  const adminProcesosDisponibles = adminEmpleadoSeleccionado
+  const adminProcesosDisponibles = (adminEmpleadoSeleccionado
     ? (adminEmpleadoSeleccionado.procesos_asignados.length
         ? adminEmpleadoSeleccionado.procesos_asignados
         : [adminEmpleadoSeleccionado.proceso_habitual])
-    : procesos;
+    : procesos).filter((proceso) => catalogoProcesos.find((item) => item.nombre === proceso)?.paga_por_kilo ?? true);
   const adminMaterialSeleccionado = catalogoMateriales.find((item) => item.codigo === adminRegistroMaterial);
   const codigoSoplado = catalogoMateriales.find(esMaterialSoplado)?.codigo ?? '';
   const adminMaterialesDisponibles = useMemo(() => catalogoMateriales.filter((item) => {
@@ -559,6 +570,13 @@ export function AdminDashboardPage() {
   const idsRegistrosIngresoLibreVisibles = useMemo(
     () => registrosIngresoLibreFiltrados.map((registro) => registro.id),
     [registrosIngresoLibreFiltrados]
+  );
+  const totalKilosIngresoLibreFiltrados = useMemo(
+    () => registrosIngresoLibreFiltrados.reduce((total, registro) => {
+      const valorVisible = Number(registroEditValues[registro.id] ?? registro.peso_kg ?? 0);
+      return total + (Number.isFinite(valorVisible) ? valorVisible : 0);
+    }, 0),
+    [registroEditValues, registrosIngresoLibreFiltrados]
   );
   const todosRegistrosIngresoLibreSeleccionados = idsRegistrosIngresoLibreVisibles.length > 0
     && idsRegistrosIngresoLibreVisibles.every((id) => registrosIngresoLibreSeleccionados.includes(id));
@@ -770,7 +788,7 @@ export function AdminDashboardPage() {
   }
 
   const resumenPorProcesoSemana = useMemo(
-    () => procesos.flatMap((proceso) =>
+    () => procesosPorKilo.flatMap((proceso) =>
       [{
         proceso,
         materiales: materiales.map((material) => {
@@ -812,7 +830,7 @@ export function AdminDashboardPage() {
           )
       }]
     ),
-    [materiales, procesos, registros, tarifas, weekDates]
+    [materiales, procesosPorKilo, registros, tarifas, weekDates]
   );
 
   const resumenProcesoMaterialSemana = useMemo(
@@ -860,8 +878,9 @@ export function AdminDashboardPage() {
     if (printingEmployeeId) return;
     setPrintingEmployeeId(empleado.id);
     try {
+      const procesosPagadosPorKilo = new Set(catalogoProcesos.filter((proceso) => proceso.paga_por_kilo).map((proceso) => proceso.nombre));
       const registrosEmpleado = registros
-        .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha))
+        .filter((item) => item.empleado_id === empleado.id && weekDates.includes(item.fecha) && procesosPagadosPorKilo.has(item.proceso))
         .sort((a, b) => a.fecha.localeCompare(b.fecha));
       const totalKg = registrosEmpleado.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
       const subtotalProduccion = registrosEmpleado.reduce(
@@ -874,6 +893,9 @@ export function AdminDashboardPage() {
         .sort((a, b) => a.created_at.localeCompare(b.created_at));
       const totalPagar = subtotalProduccion + pagoAdicional;
       const esEmpleadoPlanta = esEmpleadoDePlanta(empleado);
+      const procesosAsignados = empleado.procesos_asignados.length ? empleado.procesos_asignados : [empleado.proceso_habitual];
+      const empleadoRecibePagoPorKilos = procesosAsignados.some((proceso) => procesosPagadosPorKilo.has(proceso));
+      const procesosAsignadosTexto = `(${procesosAsignados.join(' - ')})`;
       const receipt = new EscPosReceipt();
 
       receipt
@@ -882,13 +904,14 @@ export function AdminDashboardPage() {
         .line('COMPROBANTE DE PAGO')
         .bold(false)
         .wrapped(empleado.nombre)
+        .wrapped(procesosAsignadosTexto)
         .align(0)
         .separator()
         .line(fitColumns('Semana', `${formatReceiptDayMonth(weekDates[0] ?? '')}-${formatReceiptDate(weekDates[weekDates.length - 1] ?? '')}`))
         .line(fitColumns('Emitido', formatReceiptDateTime(new Date())))
         .separator();
 
-      if (!esEmpleadoPlanta) {
+      if (!esEmpleadoPlanta && empleadoRecibePagoPorKilos) {
         weekDates.forEach((fecha, index) => {
           const items = registrosEmpleado.filter((item) => item.fecha === fecha);
           const totalDiaKg = items.reduce((sum, item) => sum + (item.peso_kg ?? 0), 0);
@@ -923,7 +946,7 @@ export function AdminDashboardPage() {
       if (pagosAdicionalesEmpleado.length) {
         pagosAdicionalesEmpleado.forEach((pago) => {
           receipt
-            .wrapped(`${pago.tipo === 'prestamo' ? 'Prestamo' : 'Adicional'}: ${pago.descripcion}`)
+            .wrapped(`${pago.tipo === 'prestamo' ? 'Prestamo' : (pago.proceso ?? 'Adicional')}: ${pago.descripcion}`)
             .line(fitColumns(pago.tipo === 'prestamo' ? 'Descuento' : 'Valor', formatReceiptCurrency(Math.abs(pago.valor))));
         });
       } else {
@@ -964,19 +987,20 @@ export function AdminDashboardPage() {
 
   async function handleCrearTarifa(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!nuevoTarifaProceso || !nuevoTarifaMaterial || nuevoTarifaPrecio <= 0) return;
+    const precio = parseCurrencyInput(nuevoTarifaPrecio);
+    if (!nuevoTarifaProceso || !nuevoTarifaMaterial || precio <= 0) return;
 
     setLoadingAction(true);
     const { data, error } = await supabase
       .from('tarifas')
-      .insert([{ proceso: nuevoTarifaProceso, material: nuevoTarifaMaterial, precio_unidad: nuevoTarifaPrecio }])
+      .insert([{ proceso: nuevoTarifaProceso, material: nuevoTarifaMaterial, precio_unidad: precio }])
       .select()
       .single();
     if (!error && data) {
       setTarifas((current) => [...current, data as Tarifa]);
       setNuevoTarifaProceso('Picador');
       setNuevoTarifaMaterial('Poli');
-      setNuevoTarifaPrecio(0);
+      setNuevoTarifaPrecio('');
       notify('success', 'La tarifa fue creada correctamente.');
     } else {
       notify('error', `No se pudo crear la tarifa: ${error?.message ?? 'error desconocido'}`);
@@ -1055,17 +1079,18 @@ export function AdminDashboardPage() {
     setLoadingAction(true);
     const { data, error } = await supabase
       .from('pagos_adicionales')
-      .insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], fecha: nuevoPagoFecha, descripcion: nuevoPagoDescripcion.trim(), valor: valorPago, tipo: nuevoPagoTipo }])
+      .insert([{ empleado_id: pagoEmpleadoId, semana_inicio: weekDates[0], fecha: nuevoPagoFecha, descripcion: nuevoPagoDescripcion.trim(), valor: valorPago, tipo: nuevoPagoTipo, proceso: nuevoPagoProceso || null }])
       .select()
       .single();
     if (!error && data) {
       const creado = data as PagoAdicional;
       setPagosAdicionales((current) => [...current, creado]);
-      setPagoEditValues((current) => ({ ...current, [creado.id]: { fecha: creado.fecha, descripcion: creado.descripcion, valor: formatCurrencyInput(String(Math.abs(creado.valor))), tipo: creado.tipo } }));
+      setPagoEditValues((current) => ({ ...current, [creado.id]: { fecha: creado.fecha, descripcion: creado.descripcion, valor: formatCurrencyInput(String(Math.abs(creado.valor))), tipo: creado.tipo, proceso: creado.proceso ?? '' } }));
       setNuevoPagoDescripcion('');
       setNuevoPagoValor('');
       setPagoEmpleadoId('');
       setNuevoPagoTipo('adicional');
+      setNuevoPagoProceso('');
       notify('success', nuevoPagoTipo === 'prestamo' ? 'El préstamo fue agregado como descuento.' : 'El pago adicional fue agregado y los totales se actualizaron.');
     } else {
       notify('error', `No se pudo agregar el pago: ${error?.message ?? 'error desconocido'}`);
@@ -1137,7 +1162,7 @@ export function AdminDashboardPage() {
     setLoadingAction(true);
     const { data, error } = await supabase
       .from('pagos_adicionales')
-      .update({ fecha: values.fecha, descripcion: values.descripcion.trim(), valor, tipo: values.tipo })
+      .update({ fecha: values.fecha, descripcion: values.descripcion.trim(), valor, tipo: values.tipo, proceso: values.proceso || null })
       .eq('id', id)
       .eq('semana_inicio', weekDates[0])
       .select()
@@ -1145,7 +1170,7 @@ export function AdminDashboardPage() {
     if (!error && data) {
       const actualizado = data as PagoAdicional;
       setPagosAdicionales((current) => current.map((pago) => pago.id === id ? actualizado : pago));
-      setPagoEditValues((current) => ({ ...current, [id]: { fecha: actualizado.fecha, descripcion: actualizado.descripcion, valor: formatCurrencyInput(String(Math.abs(actualizado.valor))), tipo: actualizado.tipo } }));
+      setPagoEditValues((current) => ({ ...current, [id]: { fecha: actualizado.fecha, descripcion: actualizado.descripcion, valor: formatCurrencyInput(String(Math.abs(actualizado.valor))), tipo: actualizado.tipo, proceso: actualizado.proceso ?? '' } }));
       notify('success', 'El pago adicional fue actualizado.');
     } else {
       notify('error', `No se pudo actualizar el pago adicional: ${error?.message ?? 'error desconocido'}`);
@@ -1321,11 +1346,12 @@ export function AdminDashboardPage() {
     if (!nombre) return;
 
     setLoadingAction(true);
-    const { data, error } = await supabase.from('procesos').insert({ nombre }).select('nombre').single();
+    const { data, error } = await supabase.from('procesos').insert({ nombre, paga_por_kilo: nuevoProcesoPagaPorKilo }).select('nombre,paga_por_kilo').single();
     if (!error && data) {
       setCatalogoProcesos((current) => [...current, data as CatalogoProceso].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setProcesoEditValues((current) => ({ ...current, [nombre]: nombre }));
       setNuevoProcesoNombre('');
+      setNuevoProcesoPagaPorKilo(true);
       notify('success', 'El proceso fue creado y ya está disponible en los selectores.');
     } else {
       notify('error', `No se pudo crear el proceso: ${error?.message ?? 'error desconocido'}`);
@@ -1338,10 +1364,11 @@ export function AdminDashboardPage() {
     if (!nombre) return;
 
     setLoadingAction(true);
-    const { error } = await supabase.from('procesos').update({ nombre }).eq('nombre', nombreOriginal);
+    const pagaPorKilo = procesoPagoKiloEditValues[nombreOriginal] ?? true;
+    const { error } = await supabase.from('procesos').update({ nombre, paga_por_kilo: pagaPorKilo }).eq('nombre', nombreOriginal);
     if (!error) {
       setCatalogoProcesos((current) => current
-        .map((item) => item.nombre === nombreOriginal ? { nombre } : item)
+        .map((item) => item.nombre === nombreOriginal ? { nombre, paga_por_kilo: pagaPorKilo } : item)
         .sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setEmpleados((current) => current.map((empleado) => ({
         ...empleado,
@@ -1359,6 +1386,12 @@ export function AdminDashboardPage() {
         const siguiente = { ...current };
         delete siguiente[nombreOriginal];
         siguiente[nombre] = nombre;
+        return siguiente;
+      });
+      setProcesoPagoKiloEditValues((current) => {
+        const siguiente = { ...current };
+        delete siguiente[nombreOriginal];
+        siguiente[nombre] = pagaPorKilo;
         return siguiente;
       });
       if (nuevoTarifaProceso === nombreOriginal) setNuevoTarifaProceso(nombre);
@@ -1491,8 +1524,9 @@ export function AdminDashboardPage() {
 
   function getResumenNominaEmpleado(empleado: Empleado) {
     const esPlanta = esEmpleadoDePlanta(empleado);
+    const procesosPagadosPorKilo = new Set(catalogoProcesos.filter((proceso) => proceso.paga_por_kilo).map((proceso) => proceso.nombre));
     const registrosEmpleado = registros.filter(
-      (registro) => registro.empleado_id === empleado.id && weekDates.includes(registro.fecha)
+      (registro) => registro.empleado_id === empleado.id && weekDates.includes(registro.fecha) && procesosPagadosPorKilo.has(registro.proceso)
     );
     const totalKg = esPlanta ? 0 : registrosEmpleado.reduce((sum, registro) => sum + (registro.peso_kg ?? 0), 0);
     const subtotalProduccion = esPlanta ? 0 : registrosEmpleado.reduce(
@@ -1586,7 +1620,7 @@ export function AdminDashboardPage() {
           email={user?.email ?? profile?.email}
           onSignOut={handleSignOut}
         />
-      <main className="mx-auto w-full max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <main className={`mx-auto w-full space-y-6 px-4 py-6 sm:px-6 ${activeTab === 'consolidado' || activeTab === 'gestion' ? 'max-w-none lg:px-5' : 'max-w-[1600px] lg:px-8'}`}>
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div><p className="eyebrow">Centro de control</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">Resumen de nómina</h2><p className="mt-1 text-sm text-slate-400">{isGerencial ? 'Consulta consolidados y analiza la producción.' : 'Gestiona la operación, tarifas y cierres desde un solo lugar.'}</p></div>
           <div className="badge-success w-fit"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Sistema operativo</div>
@@ -1639,13 +1673,13 @@ export function AdminDashboardPage() {
               </button>
             </div>
             {empleadosTableExpanded && <div id="tabla-gestion-empleados" className="responsive-table mt-6 overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
+              <table className="w-full min-w-[1450px] table-fixed border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-300">
-                    <th className="px-4 py-3">Nombre</th>
+                    <th className="w-[200px] px-4 py-3">Nombre</th>
                     <th className="px-4 py-3">Procesos asignados</th>
-                    <th className="px-4 py-3">Activo</th>
-                    <th className="px-4 py-3">Acciones</th>
+                    <th className="w-[90px] px-4 py-3">Activo</th>
+                    <th className="w-[185px] px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1684,7 +1718,8 @@ export function AdminDashboardPage() {
                           <span className="text-sm">{empleado.activo ? 'Sí' : 'No'}</span>
                         </label>
                       </td>
-                      <td className="px-4 py-3 space-x-2">
+                      <td className="px-4 py-3">
+                        <div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => handleActualizarEmpleado(empleado)}
@@ -1700,6 +1735,7 @@ export function AdminDashboardPage() {
                         >
                           Eliminar
                         </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1762,6 +1798,10 @@ export function AdminDashboardPage() {
                       className="field flex-1"
                       required
                     />
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-sm text-slate-300">
+                      <input type="checkbox" checked={nuevoProcesoPagaPorKilo} onChange={(event) => setNuevoProcesoPagaPorKilo(event.target.checked)} />
+                      Pago por kilos
+                    </label>
                     <button type="submit" disabled={loadingAction} className="btn-primary">
                       <Icon name="plus" className="h-4 w-4" /> Agregar
                     </button>
@@ -1777,6 +1817,10 @@ export function AdminDashboardPage() {
                           }))}
                           className="field flex-1"
                         />
+                        <label className="flex items-center gap-2 px-2 text-sm text-slate-300">
+                          <input type="checkbox" checked={procesoPagoKiloEditValues[proceso.nombre] ?? proceso.paga_por_kilo} onChange={(event) => setProcesoPagoKiloEditValues((current) => ({ ...current, [proceso.nombre]: event.target.checked }))} />
+                          Pago por kilos
+                        </label>
                         <button type="button" onClick={() => handleActualizarProceso(proceso.nombre)} className="rounded-xl bg-sky-500 px-3 py-2 text-sm text-white">
                           Guardar
                         </button>
@@ -2002,15 +2046,18 @@ export function AdminDashboardPage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Precio por kilo</span>
+                  <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-slate-500">$</span>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.1"
+                    type="text"
+                    inputMode="numeric"
                     value={nuevoTarifaPrecio}
-                    onChange={(event) => setNuevoTarifaPrecio(Number(event.target.value))}
-                    className="w-full rounded-2xl bg-slate-900 px-4 py-3"
-                    placeholder="0.00"
+                    onChange={(event) => setNuevoTarifaPrecio(formatCurrencyInput(event.target.value))}
+                    className="w-full rounded-2xl bg-slate-900 py-3 pl-9 pr-4"
+                    placeholder="9.000"
+                    aria-label="Precio por kilo en pesos colombianos"
                   />
+                  </div>
                 </label>
                 <div className="sm:col-span-3">
                   <button
@@ -2035,8 +2082,12 @@ export function AdminDashboardPage() {
               <div>
                 <h2 className="text-2xl font-semibold">Consolidado semanal</h2>
                 <p className="mt-2 text-slate-400">Revisa el total de kilos por empleado en la semana.</p>
+                <button type="button" className="btn-secondary mt-4" aria-expanded={consolidadoSemanalExpanded} onClick={() => setConsolidadoSemanalExpanded((value) => !value)}>
+                  <Icon name="chevronRight" className={`h-4 w-4 transition-transform ${consolidadoSemanalExpanded ? 'rotate-90' : ''}`} />
+                  {consolidadoSemanalExpanded ? 'Ocultar consolidado' : 'Mostrar consolidado'}
+                </button>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className={`${consolidadoSemanalExpanded ? 'flex' : 'hidden'} flex-wrap items-center gap-3`}>
                 <label className="text-sm text-slate-300">Inicio de semana</label>
                 <input
                   type="date"
@@ -2064,18 +2115,18 @@ export function AdminDashboardPage() {
               </div>
             </div>
             </div>
-            <div className="overflow-x-auto border-t border-slate-800">
-            <table className="min-w-[1280px] border-collapse text-left text-sm">
+            <div className={`${consolidadoSemanalExpanded ? 'block' : 'hidden'} overflow-x-auto border-t border-slate-800`}>
+            <table className="w-full min-w-[1400px] table-fixed border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-300">
-                  <th className="px-4 py-3">Empleado</th>
+                  <th className="w-[100px] whitespace-normal px-3 py-3">Empleado</th>
                   {diasSemana.map((dia, index) => (
-                    <th key={dia} className="px-4 py-3">{dia} ({weekDates[index]})</th>
+                    <th key={dia} className="whitespace-normal px-3 py-3">{dia} ({weekDates[index]})</th>
                   ))}
-                  <th className="px-4 py-3">Total kg</th>
-                  <th className="px-4 py-3">Adicionales / préstamos</th>
-                  <th className="px-4 py-3">Total a pagar</th>
-                  <th className="px-4 py-3 text-center">Acción</th>
+                  <th className="w-[85px] whitespace-normal px-3 py-3">Total kg</th>
+                  <th className="w-[155px] whitespace-normal px-3 py-3">Adicionales / préstamos</th>
+                  <th className="w-[125px] whitespace-normal px-3 py-3">Total a pagar</th>
+                  <th className="w-[70px] whitespace-normal px-3 py-3 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -2187,7 +2238,7 @@ export function AdminDashboardPage() {
               </tfoot>
             </table>
           </div>
-          <div className="space-y-3 border-t border-slate-800 bg-slate-950/30 p-4 sm:p-6">
+          <div className={`${consolidadoSemanalExpanded ? 'block' : 'hidden'} space-y-3 border-t border-slate-800 bg-slate-950/30 p-4 sm:p-6`}>
             <div>
               <h3 className="text-lg font-semibold text-white">Resumen diario por proceso</h3>
               <p className="mt-1 text-xs text-slate-500">Los totales permanecen visibles cuando una subtabla está contraída.</p>
@@ -2251,8 +2302,13 @@ export function AdminDashboardPage() {
                 <h3 className="text-xl font-semibold">Detalle por empleado</h3>
                 <p className="mt-2 text-sm text-slate-400">Selecciona empleado y día de la semana para ver todos los registros exactos tal como se ingresaron.</p>
               </div>
+              <button type="button" className="btn-secondary" aria-expanded={detalleEmpleadoExpanded} onClick={() => setDetalleEmpleadoExpanded((value) => !value)}>
+                <Icon name="chevronRight" className={`h-4 w-4 transition-transform ${detalleEmpleadoExpanded ? 'rotate-90' : ''}`} />
+                {detalleEmpleadoExpanded ? 'Ocultar' : 'Mostrar'}
+              </button>
             </div>
 
+            <div className={detalleEmpleadoExpanded ? 'block' : 'hidden'}>
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">Empleado</span>
@@ -2368,6 +2424,7 @@ export function AdminDashboardPage() {
                 </table>
               )}
             </div>
+            </div>
           </div>
 
           {isAdmin && (
@@ -2377,9 +2434,16 @@ export function AdminDashboardPage() {
                   <h3 className="text-xl font-semibold">Ingreso libre de kilos</h3>
                   <p className="mt-2 text-sm text-slate-400">Como admin puedes registrar un peso para cualquier fecha. Replica la pantalla de carga diaria pero con fecha habilitada.</p>
                 </div>
-                <span className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-300">Solo admin</span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-300">Solo admin</span>
+                  <button type="button" className="btn-secondary" aria-expanded={ingresoLibreExpanded} onClick={() => setIngresoLibreExpanded((value) => !value)}>
+                    <Icon name="chevronRight" className={`h-4 w-4 transition-transform ${ingresoLibreExpanded ? 'rotate-90' : ''}`} />
+                    {ingresoLibreExpanded ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </div>
               </div>
 
+              <div className={ingresoLibreExpanded ? 'block' : 'hidden'}>
               <div className="mt-6 grid gap-4 lg:grid-cols-3">
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Fecha</span>
@@ -2613,15 +2677,29 @@ export function AdminDashboardPage() {
                       </tr>
                     )}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-indigo-500/40 bg-slate-950/80 font-bold text-white">
+                      <td colSpan={5} className="px-4 py-4 text-right">Total de los registros filtrados</td>
+                      <td className="px-4 py-4 text-indigo-300">{totalKilosIngresoLibreFiltrados.toLocaleString('es-CO', { maximumFractionDigits: 1 })} kg</td>
+                      <td className="px-4 py-4" />
+                    </tr>
+                  </tfoot>
                 </table>
+              </div>
               </div>
             </div>
           )}
 
           <div className="grid gap-6 xl:grid-cols-[3fr_1fr]">
             <div className="card p-5 sm:p-6">
-              <h3 className="text-xl font-semibold">Pagos adicionales</h3>
-              <p className="mt-1 text-sm text-slate-400">Registra y consulta conceptos por fecha y empleado dentro de la semana.</p>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div><h3 className="text-xl font-semibold">Pagos adicionales</h3><p className="mt-1 text-sm text-slate-400">Registra y consulta conceptos por fecha y empleado dentro de la semana.</p></div>
+                <button type="button" className="btn-secondary" aria-expanded={pagosAdicionalesExpanded} onClick={() => setPagosAdicionalesExpanded((value) => !value)}>
+                  <Icon name="chevronRight" className={`h-4 w-4 transition-transform ${pagosAdicionalesExpanded ? 'rotate-90' : ''}`} />
+                  {pagosAdicionalesExpanded ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
+              <div className={pagosAdicionalesExpanded ? 'block' : 'hidden'}>
               {isAdmin && (
               <form onSubmit={handleCrearPagoAdicional} className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[145px_160px_minmax(160px,1.1fr)_minmax(170px,1.2fr)_145px_130px]">
                 <label className="space-y-2">
@@ -2630,9 +2708,10 @@ export function AdminDashboardPage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm text-slate-300">Tipo</span>
-                  <select value={nuevoPagoTipo} onChange={(event) => setNuevoPagoTipo(event.target.value as PagoAdicional['tipo'])} disabled={semanaNominaNoEditable} className="w-full rounded-2xl bg-slate-900 px-4 py-3">
+                  <select value={nuevoPagoProceso ? `proceso:${nuevoPagoProceso}` : nuevoPagoTipo} onChange={(event) => { const value = event.target.value; if (value.startsWith('proceso:')) { const proceso = value.slice(8); setNuevoPagoTipo('adicional'); setNuevoPagoProceso(proceso); setNuevoPagoDescripcion(proceso); } else { setNuevoPagoTipo(value as PagoAdicional['tipo']); setNuevoPagoProceso(''); } }} disabled={semanaNominaNoEditable} className="w-full rounded-2xl bg-slate-900 px-4 py-3">
                     <option value="adicional">Pago adicional</option>
                     <option value="prestamo">Préstamo al trabajador</option>
+                    {procesosPorConcepto.map((proceso) => <option key={proceso.nombre} value={`proceso:${proceso.nombre}`}>{proceso.nombre}</option>)}
                   </select>
                 </label>
                 <label className="space-y-2">
@@ -2693,12 +2772,12 @@ export function AdminDashboardPage() {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{pagosAdicionalesFiltrados.length} de {pagosAdicionales.length} conceptos</span><span>Neto filtrado: <strong className="text-emerald-300">{formatCurrency(pagosAdicionalesFiltrados.reduce((sum, pago) => sum + pago.valor, 0))}</strong></span></div>
               <div className="mt-6 space-y-3">
                 {pagosAdicionalesFiltrados.map((pago) => {
-                  const editValues = pagoEditValues[pago.id] ?? { fecha: pago.fecha ?? weekDates[0] ?? '', descripcion: pago.descripcion, valor: formatCurrencyInput(String(Math.abs(pago.valor))), tipo: pago.tipo ?? 'adicional' };
+                  const editValues = pagoEditValues[pago.id] ?? { fecha: pago.fecha ?? weekDates[0] ?? '', descripcion: pago.descripcion, valor: formatCurrencyInput(String(Math.abs(pago.valor))), tipo: pago.tipo ?? 'adicional', proceso: pago.proceso ?? '' };
                   return <div key={pago.id} className="rounded-3xl border border-slate-800 bg-slate-900/95 p-4">
                     <p className="mb-3 font-semibold text-white">{empleados.find((emp) => emp.id === pago.empleado_id)?.nombre ?? 'Empleado'}</p>
                     <div className="grid gap-3 md:grid-cols-[160px_190px_1fr_180px_auto] md:items-end">
                       <label className="field-label"><span>Fecha</span><input type="date" min={weekDates[0]} max={weekDates[weekDates.length - 1]} value={editValues.fecha} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, fecha: event.target.value } }))} className="field-input" /></label>
-                      <label className="field-label"><span>Tipo</span><select value={editValues.tipo} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, tipo: event.target.value as PagoAdicional['tipo'] } }))} className="field-input"><option value="adicional">Pago adicional</option><option value="prestamo">Préstamo</option></select></label>
+                      <label className="field-label"><span>Tipo</span><select value={editValues.proceso ? `proceso:${editValues.proceso}` : editValues.tipo} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => { const value = event.target.value; const proceso = value.startsWith('proceso:') ? value.slice(8) : ''; setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, tipo: proceso ? 'adicional' : value as PagoAdicional['tipo'], proceso, descripcion: proceso || editValues.descripcion } })); }} className="field-input"><option value="adicional">Pago adicional</option><option value="prestamo">Préstamo</option>{procesosPorConcepto.map((proceso) => <option key={proceso.nombre} value={`proceso:${proceso.nombre}`}>{proceso.nombre}</option>)}</select></label>
                       <label className="field-label"><span>Concepto</span><input value={editValues.descripcion} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, descripcion: event.target.value } }))} className="field-input" /></label>
                       <label className="field-label"><span>Valor</span><div className="relative"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-slate-500">$</span><input type="text" inputMode="numeric" value={editValues.valor} disabled={semanaNominaNoEditable || loadingAction} onChange={(event) => setPagoEditValues((current) => ({ ...current, [pago.id]: { ...editValues, valor: formatCurrencyInput(event.target.value) } }))} className="field-input pl-9" /></div></label>
                       {isAdmin && <div className="flex gap-2"><button type="button" onClick={() => void handleActualizarPagoAdicional(pago.id)} disabled={semanaNominaNoEditable || loadingAction} className="btn-primary h-12 px-3">Guardar</button><button type="button" onClick={() => void handleEliminarPagoAdicional(pago.id)} disabled={semanaNominaNoEditable || loadingAction} className="btn-danger h-12 px-3">Eliminar</button></div>}
@@ -2706,6 +2785,7 @@ export function AdminDashboardPage() {
                   </div>
                 })}
                 {!pagosAdicionalesFiltrados.length && <div className="rounded-2xl border border-dashed border-slate-800 p-8 text-center text-sm text-slate-500">No hay pagos adicionales que coincidan con los filtros.</div>}
+              </div>
               </div>
             </div>
             <div className="card p-5 sm:p-6">
