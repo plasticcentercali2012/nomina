@@ -80,6 +80,10 @@ function esProcesoPicado(proceso: string) {
   return normalizado.startsWith('picad');
 }
 
+function nombreProcesoRecibo(proceso: string) {
+  return esProcesoPicado(proceso) ? 'Picado' : proceso;
+}
+
 function esEmpleadoDePlanta(empleado: Empleado) {
   const procesosEmpleado = empleado.procesos_asignados.length
     ? empleado.procesos_asignados
@@ -897,7 +901,7 @@ export function AdminDashboardPage() {
       const esEmpleadoPlanta = esEmpleadoDePlanta(empleado);
       const procesosAsignados = empleado.procesos_asignados.length ? empleado.procesos_asignados : [empleado.proceso_habitual];
       const empleadoRecibePagoPorKilos = procesosAsignados.some((proceso) => procesosPagadosPorKilo.has(proceso));
-      const procesosAsignadosTexto = `(${procesosAsignados.join(' - ')})`;
+      const procesosAsignadosTexto = `(${procesosAsignados.map(nombreProcesoRecibo).join(' - ')})`;
       const receipt = new EscPosReceipt();
 
       receipt
@@ -923,14 +927,30 @@ export function AdminDashboardPage() {
           receipt.bold(true).line(fitColumns(diasSemanaRecibo[index], formatReceiptDate(fecha))).bold(false);
           if (!items.length) {
             receipt.line('Sin registros');
-          } else if (!mostrarSoloResumen) {
-            items.forEach((item) => {
-              const kilos = item.peso_kg ?? 0;
+          } else {
+            const materialesDelDia = new Map<string, { proceso: string; material: string; tarifas: Map<number, number> }>();
+            items.filter((item) => etapaDelProceso(item.proceso) !== null).forEach((item) => {
+              const clave = JSON.stringify([item.proceso, item.material]);
+              const grupo = materialesDelDia.get(clave) ?? { proceso: item.proceso, material: item.material, tarifas: new Map<number, number>() };
               const precio = getTarifaRegistro(item);
-              receipt
-                .wrapped(`${item.proceso} - ${materialDisplayNames[item.material] ?? item.material}`)
-                .line(fitColumns(`${kilos.toLocaleString('es-CO')}kg x ${formatReceiptCurrency(precio)}`, formatReceiptCurrency(kilos * precio)));
+              grupo.tarifas.set(precio, (grupo.tarifas.get(precio) ?? 0) + (item.peso_kg ?? 0));
+              materialesDelDia.set(clave, grupo);
             });
+            materialesDelDia.forEach(({ proceso, material, tarifas }) => {
+              receipt.wrapped(`${nombreProcesoRecibo(proceso)} - ${materialDisplayNames[material] ?? material}:`);
+              tarifas.forEach((kilos, precio) => {
+                receipt.line(fitColumns(`${kilos.toLocaleString('es-CO')}kg X ${precio.toLocaleString('es-CO')}`, `$${Math.round(kilos * precio).toLocaleString('es-CO')}`));
+              });
+            });
+            if (!mostrarSoloResumen) {
+              items.filter((item) => etapaDelProceso(item.proceso) === null).forEach((item) => {
+                const kilos = item.peso_kg ?? 0;
+                const precio = getTarifaRegistro(item);
+                receipt
+                  .wrapped(`${nombreProcesoRecibo(item.proceso)} - ${materialDisplayNames[item.material] ?? item.material}`)
+                  .line(fitColumns(`${kilos.toLocaleString('es-CO')}kg x ${formatReceiptCurrency(precio)}`, formatReceiptCurrency(kilos * precio)));
+              });
+            }
           }
           receipt
             .bold(true)
