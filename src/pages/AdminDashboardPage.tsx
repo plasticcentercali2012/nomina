@@ -109,6 +109,7 @@ export function AdminDashboardPage() {
   const { profile, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const empleadosActivos = useMemo(() => empleados.filter((empleado) => empleado.activo), [empleados]);
   const [catalogoProcesos, setCatalogoProcesos] = useState<CatalogoProceso[]>([]);
   const [catalogoMateriales, setCatalogoMateriales] = useState<CatalogoMaterial[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioSistema[]>([]);
@@ -437,18 +438,19 @@ export function AdminDashboardPage() {
   }, [activeTab, rangoAnalitica, rangoAnaliticaCargado]);
 
   useEffect(() => {
-    if (!empleados.length) {
-      setSelectedEmpleadoId('');
-      setAdminRegistroEmpleadoId('');
-      return;
+    if (!empleadosActivos.some((empleado) => empleado.id === selectedEmpleadoId)) {
+      setSelectedEmpleadoId(empleadosActivos[0]?.id ?? '');
     }
-    if (!empleados.some((empleado) => empleado.id === selectedEmpleadoId)) {
-      setSelectedEmpleadoId(empleados[0].id);
+    if (!empleadosActivos.some((empleado) => empleado.id === adminRegistroEmpleadoId)) {
+      setAdminRegistroEmpleadoId(empleadosActivos[0]?.id ?? '');
     }
-    if (!empleados.some((empleado) => empleado.id === adminRegistroEmpleadoId)) {
-      setAdminRegistroEmpleadoId(empleados[0]?.id ?? '');
+    if (pagoEmpleadoId && !empleadosActivos.some((empleado) => empleado.id === pagoEmpleadoId)) {
+      setPagoEmpleadoId('');
     }
-  }, [empleados, selectedEmpleadoId, adminRegistroEmpleadoId]);
+    if (filtroPagoEmpleado && !empleadosActivos.some((empleado) => empleado.id === filtroPagoEmpleado)) {
+      setFiltroPagoEmpleado('');
+    }
+  }, [empleadosActivos, selectedEmpleadoId, adminRegistroEmpleadoId, pagoEmpleadoId, filtroPagoEmpleado]);
 
   useEffect(() => {
     const empleado = empleados.find((item) => item.id === adminRegistroEmpleadoId);
@@ -597,7 +599,7 @@ export function AdminDashboardPage() {
       notify('error', 'La nómina de esta semana ya fue pagada y no admite nuevos registros.');
       return;
     }
-    if (!adminRegistroEmpleadoId || !adminRegistroKilos) {
+    if (!empleadosActivos.some((empleado) => empleado.id === adminRegistroEmpleadoId) || !adminRegistroKilos) {
       notify('error', 'Selecciona un empleado e ingresa los kilos antes de registrar.');
       return;
     }
@@ -841,13 +843,13 @@ export function AdminDashboardPage() {
   );
 
   const totalKilosSemana = useMemo(
-    () => empleados.reduce((total, empleado) => total + getResumenNominaEmpleado(empleado).totalKg, 0),
-    [empleados, registros, weekDates]
+    () => empleadosActivos.reduce((total, empleado) => total + getResumenNominaEmpleado(empleado).totalKg, 0),
+    [empleadosActivos, registros, weekDates]
   );
 
   const totalPagosAdicionalesSemana = useMemo(
-    () => pagosAdicionales.reduce((total, pago) => total + pago.valor, 0),
-    [pagosAdicionales]
+    () => empleadosActivos.reduce((total, empleado) => total + getPagoAdicional(empleado.id), 0),
+    [empleadosActivos, pagosAdicionales]
   );
 
   const pagosAdicionalesFiltrados = useMemo(
@@ -859,8 +861,8 @@ export function AdminDashboardPage() {
   );
 
   const totalAPagarSemana = useMemo(
-    () => empleados.reduce((total, empleado) => total + getResumenNominaEmpleado(empleado).totalPagar, 0),
-    [empleados, pagosAdicionales, registros, tarifas, weekDates]
+    () => empleadosActivos.reduce((total, empleado) => total + getResumenNominaEmpleado(empleado).totalPagar, 0),
+    [empleadosActivos, pagosAdicionales, registros, tarifas, weekDates]
   );
 
   const nominaSemanaPagada = nominasSemanales.some(
@@ -1067,7 +1069,7 @@ export function AdminDashboardPage() {
       return;
     }
     const valorPago = parseCurrencyInput(nuevoPagoValor);
-    if (!pagoEmpleadoId || !nuevoPagoFecha || !nuevoPagoDescripcion.trim() || valorPago <= 0) {
+    if (!empleadosActivos.some((empleado) => empleado.id === pagoEmpleadoId) || !nuevoPagoFecha || !nuevoPagoDescripcion.trim() || valorPago <= 0) {
       notify('error', 'Selecciona fecha, empleado, concepto e ingresa un valor mayor que cero.');
       return;
     }
@@ -1539,7 +1541,7 @@ export function AdminDashboardPage() {
 
   function exportSemanalCsv() {
     const headers = ['Empleado', ...weekDates, 'Total kg', 'Adicionales y préstamos', 'Total a pagar'];
-    const rows = empleados.map((empleado) => {
+    const rows = empleadosActivos.map((empleado) => {
       const esPlanta = esEmpleadoDePlanta(empleado);
       const values = weekDates.map((iso) => {
         if (esPlanta) return '0';
@@ -2130,7 +2132,7 @@ export function AdminDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {empleados.map((empleado) => {
+                {empleadosActivos.map((empleado) => {
                   const esPlanta = esEmpleadoDePlanta(empleado);
                   const dias = weekDates.map((iso) =>
                     esPlanta ? 0 : registros.filter((item) => item.empleado_id === empleado.id && item.fecha === iso).reduce((sum, item) => sum + (item.peso_kg ?? 0), 0)
@@ -2223,7 +2225,7 @@ export function AdminDashboardPage() {
                   </td>
                   {weekDates.map((fecha) => {
                     const totalDia = registros
-                      .filter((registro) => registro.fecha === fecha)
+                      .filter((registro) => registro.fecha === fecha && empleadosActivos.some((empleado) => empleado.id === registro.empleado_id))
                       .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0);
                     return (
                       <td key={`total-${fecha}`} className="px-4 py-3 text-xs font-bold text-white">
@@ -2317,7 +2319,7 @@ export function AdminDashboardPage() {
                   onChange={(event) => setSelectedEmpleadoId(event.target.value)}
                   className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                 >
-                  {empleados.map((empleado) => (
+                  {empleadosActivos.map((empleado) => (
                     <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>
                   ))}
                 </select>
@@ -2461,7 +2463,7 @@ export function AdminDashboardPage() {
                     onChange={(event) => setAdminRegistroEmpleadoId(event.target.value)}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
-                    {empleados.map((empleado) => (
+                    {empleadosActivos.map((empleado) => (
                       <option key={empleado.id} value={empleado.id}>{empleado.nombre}{empleadoSoloLavador(empleado) ? ' · Solo Lavador' : ''}</option>
                     ))}
                   </select>
@@ -2723,7 +2725,7 @@ export function AdminDashboardPage() {
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
                   >
                     <option value="">Seleccione empleado</option>
-                    {empleados.map((empleado) => (
+                    {empleadosActivos.map((empleado) => (
                       <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>
                     ))}
                   </select>
@@ -2766,7 +2768,7 @@ export function AdminDashboardPage() {
               {nominaSemanaPagada && <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">Semana pagada: los conceptos permanecen disponibles como histórico y ya no pueden modificarse.</div>}
               <div className="mt-6 grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 md:grid-cols-[1fr_1.4fr_auto] md:items-end">
                 <label className="field-label"><span>Filtrar por fecha</span><input type="date" min={weekDates[0]} max={weekDates[weekDates.length - 1]} value={filtroPagoFecha} onChange={(event) => setFiltroPagoFecha(event.target.value)} className="field-input" /></label>
-                <label className="field-label"><span>Filtrar por empleado</span><select value={filtroPagoEmpleado} onChange={(event) => setFiltroPagoEmpleado(event.target.value)} className="field-input"><option value="">Todos los empleados</option>{empleados.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}</select></label>
+                <label className="field-label"><span>Filtrar por empleado</span><select value={filtroPagoEmpleado} onChange={(event) => setFiltroPagoEmpleado(event.target.value)} className="field-input"><option value="">Todos los empleados</option>{empleadosActivos.map((empleado) => <option key={empleado.id} value={empleado.id}>{empleado.nombre}</option>)}</select></label>
                 <button type="button" className="btn-secondary h-12" onClick={() => { const hoy = formatLocalDate(new Date()); setFiltroPagoFecha(weekDates.includes(hoy) ? hoy : weekDates[0] ?? ''); setFiltroPagoEmpleado(''); }}>Restablecer filtros</button>
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{pagosAdicionalesFiltrados.length} de {pagosAdicionales.length} conceptos</span><span>Neto filtrado: <strong className="text-emerald-300">{formatCurrency(pagosAdicionalesFiltrados.reduce((sum, pago) => sum + pago.valor, 0))}</strong></span></div>
@@ -2806,7 +2808,7 @@ export function AdminDashboardPage() {
                 {nominaSemanaPagada ? 'Nómina pagada y cerrada' : 'Pagar y guardar nómina semanal'}
               </button>}
               <div className="mt-6 space-y-3 text-slate-300">
-                <p>Total empleados: {empleados.length}</p>
+                <p>Total empleados: {empleadosActivos.length}</p>
                 <p>Pagos adicionales: {formatCurrency(pagosAdicionales.filter((pago) => pago.tipo !== 'prestamo').reduce((sum, pago) => sum + pago.valor, 0))}</p>
                 <p>Préstamos descontados: {formatCurrency(pagosAdicionales.filter((pago) => pago.tipo === 'prestamo').reduce((sum, pago) => sum + Math.abs(pago.valor), 0))}</p>
                 <p className="font-semibold">Total a pagar general: {formatCurrency(totalAPagarSemana)}</p>
