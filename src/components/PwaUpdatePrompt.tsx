@@ -58,7 +58,7 @@ export function PwaUpdatePrompt() {
   }
 
   return (
-    <aside role="alert" aria-live="assertive" className="fixed inset-x-4 bottom-4 z-[100] mx-auto max-w-lg rounded-2xl border border-indigo-400/30 bg-slate-900/95 p-4 shadow-2xl shadow-black/40 backdrop-blur">
+    <aside role="alert" aria-live="assertive" className="fixed inset-x-4 bottom-4 z-[100] mx-auto max-w-lg rounded-2xl border border-brand-400/30 bg-slate-900/95 p-4 shadow-2xl shadow-black/40 backdrop-blur">
       <p className="font-semibold text-white">Hay una nueva versión disponible</p>
       <p className="mt-1 text-sm text-slate-400">
         Actualiza para cargar los últimos cambios. Este aviso permanecerá disponible hasta que actualices.

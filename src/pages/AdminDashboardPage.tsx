@@ -1654,7 +1654,7 @@ export function AdminDashboardPage() {
             <button
               type="button"
               onClick={() => setActiveTab('gestion')}
-              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'gestion' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'gestion' ? 'bg-brand-500 text-white shadow-lg shadow-brand-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
               <Icon name="users" className="h-4 w-4" /><span className="hidden sm:inline">Gestión de </span>empleados
             </button>
@@ -1663,7 +1663,7 @@ export function AdminDashboardPage() {
             <button
               type="button"
               onClick={() => setActiveTab('tarifas')}
-              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'tarifas' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'tarifas' ? 'bg-brand-500 text-white shadow-lg shadow-brand-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
               <Icon name="wallet" className="h-4 w-4" /> Tarifas
             </button>
@@ -1671,14 +1671,14 @@ export function AdminDashboardPage() {
             <button
               type="button"
               onClick={() => setActiveTab('consolidado')}
-              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'consolidado' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'consolidado' ? 'bg-brand-500 text-white shadow-lg shadow-brand-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
               <Icon name="grid" className="h-4 w-4" /> Consolidado
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('analitica')}
-              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'analitica' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border-0 px-3 py-2.5 text-xs font-semibold transition sm:text-sm ${activeTab === 'analitica' ? 'bg-brand-500 text-white shadow-lg shadow-brand-950/30' : 'bg-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white'}`}
             >
               <Icon name="activity" className="h-4 w-4" /> Analítica
             </button>
@@ -2544,7 +2544,7 @@ export function AdminDashboardPage() {
               </div>
 
               {(adminRequierePareado || adminAjusteSopladoRegistrado) && (
-                <div className="mt-4 rounded-2xl border border-indigo-500/20 bg-indigo-500/[.06] p-4">
+                <div className="mt-4 rounded-2xl border border-brand-500/20 bg-brand-500/[.06] p-4">
                   <div className="mb-4">
                     <p className="text-sm font-semibold text-white">Lavado, aglutinado y soplado</p>
                     <p className="mt-1 text-xs leading-5 text-slate-400">La fecha seleccionada controla el único ajuste de soplado permitido para ese día.</p>
@@ -2627,7 +2627,7 @@ export function AdminDashboardPage() {
                           onChange={(event) => setRegistrosIngresoLibreSeleccionados(
                             event.target.checked ? idsRegistrosIngresoLibreVisibles : []
                           )}
-                          className="h-4 w-4 accent-indigo-500"
+                          className="h-4 w-4 accent-brand-500"
                         />
                       </th>
                       <th className="px-4 py-3">Fecha</th>
@@ -2652,7 +2652,7 @@ export function AdminDashboardPage() {
                                 ? [...actuales, registro.id]
                                 : actuales.filter((id) => id !== registro.id)
                             )}
-                            className="h-4 w-4 accent-indigo-500"
+                            className="h-4 w-4 accent-brand-500"
                           />
                         </td>
                         <td className="px-4 py-3">{registro.fecha}</td>
@@ -2700,9 +2700,9 @@ export function AdminDashboardPage() {
                     )}
                   </tbody>
                   <tfoot>
-                    <tr className="border-t-2 border-indigo-500/40 bg-slate-950/80 font-bold text-white">
+                    <tr className="border-t-2 border-brand-500/40 bg-slate-950/80 font-bold text-white">
                       <td colSpan={5} className="px-4 py-4 text-right">Total de los registros filtrados</td>
-                      <td className="px-4 py-4 text-indigo-300">{totalKilosIngresoLibreFiltrados.toLocaleString('es-CO', { maximumFractionDigits: 1 })} kg</td>
+                      <td className="px-4 py-4 text-brand-300">{totalKilosIngresoLibreFiltrados.toLocaleString('es-CO', { maximumFractionDigits: 1 })} kg</td>
                       <td className="px-4 py-4" />
                     </tr>
                   </tfoot>
@@ -2853,7 +2853,7 @@ export function AdminDashboardPage() {
                   <div className="flex rounded-xl border border-slate-800 bg-slate-950 p-1">
                     {(['dia', 'semana', 'mes'] as const).map((periodo) => (
                       <button key={periodo} type="button" onClick={() => setPeriodoAnalitica(periodo)}
-                        className={`rounded-lg border-0 px-3 py-2 text-xs font-semibold capitalize transition ${periodoAnalitica === periodo ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-500 hover:text-slate-200'}`}>
+                        className={`rounded-lg border-0 px-3 py-2 text-xs font-semibold capitalize transition ${periodoAnalitica === periodo ? 'bg-brand-500 text-white' : 'bg-transparent text-slate-500 hover:text-slate-200'}`}>
                         {periodo === 'dia' ? 'Día' : periodo}
                       </button>
                     ))}
@@ -2869,11 +2869,11 @@ export function AdminDashboardPage() {
               </div>
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-800 pt-4 text-xs text-slate-400">
-              <span className="badge bg-indigo-500/10 text-indigo-300 ring-indigo-500/20">
+              <span className="badge bg-brand-500/10 text-brand-300 ring-brand-500/20">
                 {rangoAnalitica.inicio === rangoAnalitica.fin ? rangoAnalitica.inicio : `${rangoAnalitica.inicio} — ${rangoAnalitica.fin}`}
               </span>
               <span>{registrosAnalitica.length} registros encontrados</span>
-              {cantidadFiltrosAnalitica > 0 && <><span className="badge-warning">{cantidadFiltrosAnalitica} {cantidadFiltrosAnalitica === 1 ? 'filtro activo' : 'filtros activos'}</span><button type="button" className="border-0 bg-transparent font-semibold text-indigo-300 hover:text-indigo-200" onClick={limpiarFiltrosDetalle}>Quitar filtros</button></>}
+              {cantidadFiltrosAnalitica > 0 && <><span className="badge-warning">{cantidadFiltrosAnalitica} {cantidadFiltrosAnalitica === 1 ? 'filtro activo' : 'filtros activos'}</span><button type="button" className="border-0 bg-transparent font-semibold text-brand-300 hover:text-brand-200" onClick={limpiarFiltrosDetalle}>Quitar filtros</button></>}
             </div>
           </div>
           <div className="card overflow-hidden">
@@ -2911,7 +2911,7 @@ export function AdminDashboardPage() {
                             <tr key={nomina.id} className="border-t border-slate-800/70">
                               <td data-label="Empleado" className="px-4 py-3 font-semibold text-white">
                                 <span>{nomina.empleado_nombre ?? 'Empleado'}</span>
-                                {Boolean(nomina.nomina_produccion_detalle?.length) && <details className="mt-2 font-normal"><summary className="cursor-pointer text-xs font-semibold text-indigo-300">Ver {nomina.nomina_produccion_detalle?.length} registros congelados</summary><div className="mt-2 min-w-72 space-y-2 rounded-xl border border-slate-800 bg-slate-950 p-3">{nomina.nomina_produccion_detalle?.map((detalle) => <div key={detalle.id} className="border-b border-slate-800 pb-2 text-xs last:border-0 last:pb-0"><p className="text-slate-300">{detalle.fecha} · {detalle.proceso} · {detalle.material_nombre}</p><p className={detalle.es_ajuste_soplado ? 'text-rose-300' : 'text-slate-500'}>{detalle.peso_kg.toLocaleString('es-CO')} kg × {formatCurrency(detalle.precio_unidad)} = {formatCurrency(detalle.subtotal)}</p></div>)}</div></details>}
+                                {Boolean(nomina.nomina_produccion_detalle?.length) && <details className="mt-2 font-normal"><summary className="cursor-pointer text-xs font-semibold text-brand-300">Ver {nomina.nomina_produccion_detalle?.length} registros congelados</summary><div className="mt-2 min-w-72 space-y-2 rounded-xl border border-slate-800 bg-slate-950 p-3">{nomina.nomina_produccion_detalle?.map((detalle) => <div key={detalle.id} className="border-b border-slate-800 pb-2 text-xs last:border-0 last:pb-0"><p className="text-slate-300">{detalle.fecha} · {detalle.proceso} · {detalle.material_nombre}</p><p className={detalle.es_ajuste_soplado ? 'text-rose-300' : 'text-slate-500'}>{detalle.peso_kg.toLocaleString('es-CO')} kg × {formatCurrency(detalle.precio_unidad)} = {formatCurrency(detalle.subtotal)}</p></div>)}</div></details>}
                               </td>
                               <td data-label="Proceso" className="px-4 py-3 text-slate-300">{nomina.proceso_snapshot ?? '-'}</td>
                               <td data-label="Kilos" className="px-4 py-3 text-right">{nomina.total_kg.toLocaleString('es-CO')} kg</td>
@@ -2930,7 +2930,7 @@ export function AdminDashboardPage() {
             )}
           </div>
           {cargandoAnalitica ? (
-            <div className="card grid min-h-64 place-items-center"><div className="text-center"><span className="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-indigo-400/20 border-t-indigo-400" /><p className="mt-3 text-sm text-slate-500">Consultando producción…</p></div></div>
+            <div className="card grid min-h-64 place-items-center"><div className="text-center"><span className="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-brand-400/20 border-t-brand-400" /><p className="mt-3 text-sm text-slate-500">Consultando producción…</p></div></div>
           ) : (
           <>
           <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
@@ -3054,7 +3054,7 @@ export function AdminDashboardPage() {
                         <td data-label="Empleado" className="px-5 py-3 font-medium text-white">{empleados.find((empleado) => empleado.id === registro.empleado_id)?.nombre ?? 'Empleado'}</td>
                         <td data-label="Proceso" className="px-5 py-3">{registro.proceso}</td>
                         <td data-label="Material" className="px-5 py-3">{materialDisplayNames[registro.material]}</td>
-                        <td data-label="Volumen" className="px-5 py-3 text-right font-semibold text-indigo-300">{(registro.peso_kg ?? 0).toLocaleString('es-CO')} kg</td>
+                        <td data-label="Volumen" className="px-5 py-3 text-right font-semibold text-brand-300">{(registro.peso_kg ?? 0).toLocaleString('es-CO')} kg</td>
                       </tr>
                     ))}
                   </tbody>

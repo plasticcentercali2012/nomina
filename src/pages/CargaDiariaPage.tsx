@@ -295,7 +295,7 @@ export function CargaDiariaPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="card flex items-center gap-5 p-5">
-            <div className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400"><Icon name="weight" className="h-6 w-6" /></div>
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-500/10 text-brand-400"><Icon name="weight" className="h-6 w-6" /></div>
             <div><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Volumen registrado</p>
             <p className="mt-1 text-3xl font-bold text-white">{totalKilos.toLocaleString('es-CO')} <span className="text-sm font-medium text-slate-500">kg</span></p></div>
           </div>
@@ -375,7 +375,7 @@ export function CargaDiariaPage() {
               {requiereRegistroPareado && (
                 <div className="card-muted space-y-4 p-4 sm:col-span-2">
                   <div className="flex items-start gap-3">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-indigo-500/15 text-indigo-300">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-brand-300">
                       <Icon name="activity" className="h-4 w-4" />
                     </div>
                     <div>
