@@ -9,6 +9,7 @@ import { Icon } from '../components/ui/Icon';
 import { LoadingScreen } from '../components/ui/LoadingScreen';
 import { Toast } from '../components/ui/Toast';
 import { empleadoSoloLavador, empleadoTieneEtapa, etapaDelProceso, procesosPrincipalesEmpleado } from '../lib/productionFlow';
+import { formatWeight, parseWeight } from '../lib/weight';
 
 type EmpleadoRow = Omit<Empleado, 'procesos_asignados'> & {
   empleado_procesos?: Array<{ proceso: Proceso }>;
@@ -186,14 +187,14 @@ export function CargaDiariaPage() {
       setErrorMessage('No se encontró el material interno Soplado. Aplica la migración antes de registrar.');
       return;
     }
-    const peso = Number(valor);
-    if (!Number.isFinite(peso) || peso <= 0) {
-      setErrorMessage('Ingresa un peso mayor que cero.');
+    const peso = parseWeight(valor);
+    if (peso === null || peso <= 0) {
+      setErrorMessage('Ingresa un peso mayor que cero y con máximo dos decimales.');
       return;
     }
-    const cantidadSoplado = Number(sopladoKg || 0);
-    if (!Number.isFinite(cantidadSoplado) || cantidadSoplado < 0) {
-      setErrorMessage('La cantidad de soplado no puede ser negativa.');
+    const cantidadSoplado = parseWeight(sopladoKg || '0');
+    if (cantidadSoplado === null || cantidadSoplado < 0) {
+      setErrorMessage('La cantidad de soplado debe ser positiva y tener máximo dos decimales.');
       return;
     }
     setSaving(true);
@@ -247,8 +248,12 @@ export function CargaDiariaPage() {
   }
 
   async function handleActualizarSoplado() {
-    const cantidad = Number(sopladoKg || 0);
-    if (!Number.isFinite(cantidad) || cantidad < 0 || !ajusteSopladoRegistrado) return;
+    const cantidad = parseWeight(sopladoKg || '0');
+    if (cantidad === null || cantidad < 0) {
+      setErrorMessage('La cantidad de soplado debe tener máximo dos decimales.');
+      return;
+    }
+    if (!ajusteSopladoRegistrado) return;
     setSavingSoplado(true);
     setErrorMessage('');
     const { data, error } = await supabase
@@ -357,6 +362,8 @@ export function CargaDiariaPage() {
                 <span className="text-sm text-slate-300">Peso / Bultos</span>
                 <input
                   type="number"
+                  min="0.01"
+                  step="0.01"
                   inputMode="decimal"
                   value={valor}
                   onChange={(event) => setValor(event.target.value)}
@@ -417,7 +424,7 @@ export function CargaDiariaPage() {
                         <input
                           type="number"
                           min="0"
-                          step="0.1"
+                          step="0.01"
                           inputMode="decimal"
                           value={sopladoKg}
                           onChange={(event) => setSopladoKg(event.target.value)}
@@ -459,11 +466,11 @@ export function CargaDiariaPage() {
                       <p className="text-sm font-semibold text-amber-200">Soplado del día</p>
                       <p className="mt-0.5 text-xs text-slate-500">Descuento aplicado a lavado y aglutinado</p>
                     </div>
-                    <span className="font-bold text-amber-300">-{Math.abs(ajustesSoplado[0]?.peso_kg ?? 0).toLocaleString('es-CO')} kg</span>
+                    <span className="font-bold text-amber-300">-{formatWeight(Math.abs(ajustesSoplado[0]?.peso_kg ?? 0))} kg</span>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <div className="relative min-w-0 flex-1">
-                      <input type="number" min="0" step="0.1" inputMode="decimal" value={sopladoKg} onChange={(event) => setSopladoKg(event.target.value)} className="field py-2 pr-10" aria-label="Corregir soplado gastado hoy" />
+                      <input type="number" min="0" step="0.01" inputMode="decimal" value={sopladoKg} onChange={(event) => setSopladoKg(event.target.value)} className="field py-2 pr-10" aria-label="Corregir soplado gastado hoy" />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">kg</span>
                     </div>
                     <button type="button" onClick={() => void handleActualizarSoplado()} disabled={savingSoplado} className="btn-secondary px-3 py-2">
@@ -478,7 +485,7 @@ export function CargaDiariaPage() {
                 registrosProduccion.map((registro) => (
                   <div key={registro.id} className="flex items-center justify-between rounded-xl border border-transparent bg-slate-950/50 p-3 transition hover:border-slate-800">
                     <div><p className="text-sm font-semibold text-slate-200">{registro.proceso}</p><p className="text-xs text-slate-500">{materialDisplayNames[registro.material]}</p></div>
-                    <p className="font-bold text-white">{registro.peso_kg ?? 0} <span className="text-xs font-normal text-slate-500">kg</span></p>
+                    <p className="font-bold text-white">{formatWeight(registro.peso_kg ?? 0)} <span className="text-xs font-normal text-slate-500">kg</span></p>
                   </div>
                 ))
               )}

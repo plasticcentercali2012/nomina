@@ -12,6 +12,7 @@ import { PrinterDialog } from '../components/ui/PrinterDialog';
 import { formatLocalDate, parseLocalDate } from '../lib/dateUtils';
 import { EscPosReceipt, fitColumns, getSavedPrinter, printEscPos } from '../lib/qzPrinter';
 import { empleadoSoloLavador, empleadoTieneEtapa, etapaDelProceso, procesosPrincipalesEmpleado } from '../lib/productionFlow';
+import { formatWeight, parseWeight } from '../lib/weight';
 
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 const diasSemanaRecibo = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'] as const;
@@ -607,9 +608,9 @@ export function AdminDashboardPage() {
       notify('error', 'Selecciona un empleado e ingresa los kilos antes de registrar.');
       return;
     }
-    const kilos = Number(adminRegistroKilos);
-    if (!Number.isFinite(kilos) || kilos <= 0) {
-      notify('error', 'Ingresa una cantidad de kilos mayor que cero.');
+    const kilos = parseWeight(adminRegistroKilos);
+    if (kilos === null || kilos <= 0) {
+      notify('error', 'Ingresa una cantidad mayor que cero y con máximo dos decimales.');
       return;
     }
     if (adminRequierePareado && (!adminProcesoPareado || !adminEmpleadoPareadoId)) {
@@ -662,9 +663,9 @@ export function AdminDashboardPage() {
       notify('error', 'La nómina de esta semana ya fue pagada y el soplado quedó cerrado.');
       return;
     }
-    const cantidad = Number(adminSopladoKg || 0);
-    if (!Number.isFinite(cantidad) || cantidad < 0) {
-      notify('error', 'El soplado debe ser un número igual o mayor que cero.');
+    const cantidad = parseWeight(adminSopladoKg || '0');
+    if (cantidad === null || cantidad < 0) {
+      notify('error', 'El soplado debe ser igual o mayor que cero y tener máximo dos decimales.');
       return;
     }
     if (!adminAjusteSopladoRegistrado && (!adminRequierePareado || !adminProcesoPareado || !adminEmpleadoPareadoId)) {
@@ -877,7 +878,7 @@ export function AdminDashboardPage() {
   function getDetallesDelDia(empleadoId: string, fecha: string) {
     return registros
       .filter((item) => item.empleado_id === empleadoId && item.fecha === fecha)
-      .map((item) => `${item.proceso} ${materialDisplayNames[item.material]} ${item.peso_kg?.toFixed(0) ?? 0} kg`);
+      .map((item) => `${item.proceso} ${materialDisplayNames[item.material]} ${formatWeight(item.peso_kg ?? 0)} kg`);
   }
 
   async function imprimirComprobanteNativo(empleado: Empleado) {
@@ -1204,8 +1205,11 @@ export function AdminDashboardPage() {
     const value = registroEditValues[id];
     const nuevoProceso = registroProcesoEditValues[id];
     if (!value) return;
-    const nuevoPeso = Number(value);
-    if (Number.isNaN(nuevoPeso) || nuevoPeso < 0 || !nuevoProceso) return;
+    const nuevoPeso = parseWeight(value);
+    if (nuevoPeso === null || nuevoPeso < 0 || !nuevoProceso) {
+      notify('error', 'Los kilos deben tener máximo dos decimales.');
+      return;
+    }
 
     setLoadingAction(true);
     const { data, error } = await supabase
@@ -1571,7 +1575,7 @@ export function AdminDashboardPage() {
         return total.toFixed(0);
       });
       const resumen = getResumenNominaEmpleado(empleado);
-      return [empleado.nombre, ...values, resumen.totalKg.toFixed(0), resumen.pagoAdicional.toFixed(2), resumen.totalPagar.toFixed(2)];
+      return [empleado.nombre, ...values, formatWeight(resumen.totalKg), resumen.pagoAdicional.toFixed(2), resumen.totalPagar.toFixed(2)];
     });
 
     const csv = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
@@ -2173,7 +2177,7 @@ export function AdminDashboardPage() {
                       </td>
                     );
                   })}
-                      <td className="px-4 py-3 font-semibold text-sky-300">{esPlanta ? 'N/A' : resumenNomina.totalKg.toFixed(0)}</td>
+                      <td className="px-4 py-3 font-semibold text-sky-300">{esPlanta ? 'N/A' : formatWeight(resumenNomina.totalKg)}</td>
                       <td className={`px-4 py-3 font-semibold ${resumenNomina.pagoAdicional < 0 ? 'text-rose-300' : 'text-slate-100'}`}>{formatCurrency(resumenNomina.pagoAdicional)}</td>
                       <td className="px-4 py-3 font-semibold text-emerald-300">
                         {formatCurrency(resumenNomina.totalPagar)}
@@ -2227,11 +2231,11 @@ export function AdminDashboardPage() {
                         key={`${item.proceso}-${item.material}-${weekDates[index]}`}
                         className={`px-4 py-2 text-xs ${kilos ? 'font-semibold text-slate-100' : 'text-slate-500'}`}
                       >
-                        {kilos.toFixed(0)} kg
+                        {formatWeight(kilos)} kg
                       </td>
                     ))}
                     <td className="px-4 py-2 text-xs font-semibold text-sky-300">
-                      {item.totalKilos.toFixed(0)} kg
+                      {formatWeight(item.totalKilos)} kg
                     </td>
                     <td className="px-4 py-2 text-xs text-slate-500">—</td>
                     <td className="px-4 py-2 text-xs font-semibold text-emerald-300">
@@ -2249,11 +2253,11 @@ export function AdminDashboardPage() {
                       .reduce((total, registro) => total + (registro.peso_kg ?? 0), 0);
                     return (
                       <td key={`total-${fecha}`} className="px-4 py-3 text-xs font-bold text-white">
-                        {totalDia.toFixed(0)} kg
+                        {formatWeight(totalDia)} kg
                       </td>
                     );
                   })}
-                  <td className="px-4 py-3 font-bold text-sky-300">{totalKilosSemana.toFixed(0)} kg</td>
+                  <td className="px-4 py-3 font-bold text-sky-300">{formatWeight(totalKilosSemana)} kg</td>
                   <td className="px-4 py-3 font-bold text-slate-100">{formatCurrency(totalPagosAdicionalesSemana)}</td>
                   <td className="px-4 py-3 font-bold text-emerald-300">{formatCurrency(totalAPagarSemana)}</td>
                 </tr>
@@ -2273,7 +2277,7 @@ export function AdminDashboardPage() {
                     <span className="font-semibold text-white">{resumen.proceso}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 text-xs">
-                    <span className="text-slate-400">Total proceso: <strong className="text-sky-300">{resumen.totalKilos.toFixed(0)} kg</strong></span>
+                    <span className="text-slate-400">Total proceso: <strong className="text-sky-300">{formatWeight(resumen.totalKilos)} kg</strong></span>
                     <span className="text-slate-400">Total a pagar: <strong className="text-emerald-300">{formatCurrency(resumen.totalPagar)}</strong></span>
                   </div>
                 </summary>
@@ -2293,10 +2297,10 @@ export function AdminDashboardPage() {
                           <td className="px-4 py-3 font-medium text-slate-200">{materialDisplayNames[item.material] ?? item.material}</td>
                           {item.kilosPorDia.map((kilos, index) => (
                             <td key={`${resumen.proceso}-${item.material}-${weekDates[index]}`} className={kilos ? 'px-4 py-3 font-semibold text-white' : 'px-4 py-3 text-slate-500'}>
-                              {kilos.toFixed(0)} kg
+                              {formatWeight(kilos)} kg
                             </td>
                           ))}
-                          <td className="px-4 py-3 font-semibold text-sky-300">{item.totalKilos.toFixed(0)} kg</td>
+                          <td className="px-4 py-3 font-semibold text-sky-300">{formatWeight(item.totalKilos)} kg</td>
                           <td className="px-4 py-3 font-semibold text-emerald-300">{formatCurrency(item.totalPagar)}</td>
                         </tr>
                       ))}
@@ -2305,9 +2309,9 @@ export function AdminDashboardPage() {
                       <tr className="border-t-2 border-slate-600 bg-slate-800/80">
                         <td className="px-4 py-3 font-bold uppercase text-white">Total {resumen.proceso}</td>
                         {resumen.totalesPorDia.map((kilos, index) => (
-                          <td key={`${resumen.proceso}-total-${weekDates[index]}`} className="px-4 py-3 font-bold text-white">{kilos.toFixed(0)} kg</td>
+                          <td key={`${resumen.proceso}-total-${weekDates[index]}`} className="px-4 py-3 font-bold text-white">{formatWeight(kilos)} kg</td>
                         ))}
-                        <td className="px-4 py-3 font-bold text-sky-300">{resumen.totalKilos.toFixed(0)} kg</td>
+                        <td className="px-4 py-3 font-bold text-sky-300">{formatWeight(resumen.totalKilos)} kg</td>
                         <td className="px-4 py-3 font-bold text-emerald-300">{formatCurrency(resumen.totalPagar)}</td>
                       </tr>
                     </tfoot>
@@ -2416,7 +2420,7 @@ export function AdminDashboardPage() {
                             <input
                               type="number"
                               min="0"
-                              step="0.1"
+                              step="0.01"
                               value={registroEditValues[registro.id] ?? registro.peso_kg?.toString() ?? ''}
                               onChange={(event) => setRegistroEditValues((current) => ({
                                 ...current,
@@ -2424,7 +2428,7 @@ export function AdminDashboardPage() {
                               }))}
                               className="w-28 rounded-xl bg-slate-950 px-3 py-2"
                             />
-                          ) : `${registro.peso_kg?.toFixed(0) ?? 0} kg`}
+                          ) : `${formatWeight(registro.peso_kg ?? 0)} kg`}
                         </td>
                         <td className="px-4 py-3">{registro.cantidad_bultos ?? '-'}</td>
                         <td className="px-4 py-3">{registro.creado_por || 'N/A'}</td>
@@ -2494,7 +2498,7 @@ export function AdminDashboardPage() {
                   <input
                     type="number"
                     min="0"
-                    step="0.1"
+                    step="0.01"
                     value={adminRegistroKilos}
                     onChange={(event) => setAdminRegistroKilos(event.target.value)}
                     onKeyDown={(event) => {
@@ -2503,7 +2507,7 @@ export function AdminDashboardPage() {
                       void handleAdminCrearRegistro();
                     }}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3"
-                    placeholder="0.0"
+                    placeholder="0.00"
                   />
                 </label>
               </div>
@@ -2574,7 +2578,7 @@ export function AdminDashboardPage() {
                         <span className={adminAjusteSopladoRegistrado ? 'badge-success' : 'badge-warning'}>{adminAjusteSopladoRegistrado ? 'Registrado' : 'Nuevo'}</span>
                       </span>
                       <div className="relative">
-                        <input type="number" min="0" step="0.1" inputMode="decimal" value={adminSopladoKg} onChange={(event) => setAdminSopladoKg(event.target.value)} className="field pr-12 text-lg font-semibold" />
+                        <input type="number" min="0" step="0.01" inputMode="decimal" value={adminSopladoKg} onChange={(event) => setAdminSopladoKg(event.target.value)} className="field pr-12 text-lg font-semibold" />
                         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">kg</span>
                       </div>
                     </label>
@@ -2663,7 +2667,7 @@ export function AdminDashboardPage() {
                           <input
                             type="number"
                             min="0"
-                            step="0.1"
+                            step="0.01"
                             value={registroEditValues[registro.id] ?? registro.peso_kg?.toString() ?? ''}
                             onChange={(event) => setRegistroEditValues((current) => ({ ...current, [registro.id]: event.target.value }))}
                             className="w-28 rounded-2xl bg-slate-950 px-3 py-2 text-slate-100"
@@ -2702,7 +2706,7 @@ export function AdminDashboardPage() {
                   <tfoot>
                     <tr className="border-t-2 border-brand-500/40 bg-slate-950/80 font-bold text-white">
                       <td colSpan={5} className="px-4 py-4 text-right">Total de los registros filtrados</td>
-                      <td className="px-4 py-4 text-brand-300">{totalKilosIngresoLibreFiltrados.toLocaleString('es-CO', { maximumFractionDigits: 1 })} kg</td>
+                      <td className="px-4 py-4 text-brand-300">{formatWeight(totalKilosIngresoLibreFiltrados)} kg</td>
                       <td className="px-4 py-4" />
                     </tr>
                   </tfoot>
@@ -2940,7 +2944,7 @@ export function AdminDashboardPage() {
               {procesos.map((proceso) => (
                 <div key={proceso} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-3">
                   <span>{proceso}</span>
-                  <span className="font-semibold text-sky-300">{(estadisticas.procesos[proceso] ?? 0).toFixed(0)} kg</span>
+                  <span className="font-semibold text-sky-300">{formatWeight(estadisticas.procesos[proceso] ?? 0)} kg</span>
                 </div>
               ))}
             </div>
@@ -2952,7 +2956,7 @@ export function AdminDashboardPage() {
               {materiales.map((material) => (
                 <div key={material} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-3">
                   <span>{materialDisplayNames[material]}</span>
-                  <span className="font-semibold text-violet-300">{(estadisticas.materialesPicado[material] ?? 0).toFixed(0)} kg</span>
+                  <span className="font-semibold text-violet-300">{formatWeight(estadisticas.materialesPicado[material] ?? 0)} kg</span>
                 </div>
               ))}
             </div>
@@ -2968,7 +2972,7 @@ export function AdminDashboardPage() {
                     const valor = estadisticas.materialesAglutinado[material] ?? 0;
                     const materialCatalogo = catalogoMateriales.find((item) => item.codigo === material);
                     const soplado = Boolean(materialCatalogo && esMaterialSoplado(materialCatalogo));
-                    return <span className={`font-semibold ${soplado ? 'text-rose-300' : 'text-sky-300'}`}>{soplado ? `${Math.abs(valor).toFixed(0)} kg descuento` : `${valor.toFixed(0)} kg`}</span>;
+                    return <span className={`font-semibold ${soplado ? 'text-rose-300' : 'text-sky-300'}`}>{soplado ? `${formatWeight(Math.abs(valor))} kg descuento` : `${formatWeight(valor)} kg`}</span>;
                   })()}
                 </div>
               ))}
