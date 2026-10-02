@@ -2173,7 +2173,7 @@ export function AdminDashboardPage() {
                         className="px-4 py-3"
                         title={esPlanta ? 'Nómina fija de planta' : detalles.length ? detalles.join('\n') : 'Sin registros'}
                       >
-                        {esPlanta ? '—' : valor.toFixed(0)}
+                        {esPlanta ? '—' : formatWeight(valor)}
                       </td>
                     );
                   })}
